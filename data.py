@@ -6,7 +6,7 @@ import numpy as np
 import requests
 import yfinance as yf
 warnings.filterwarnings("ignore")  # yfinance re-enables its own deprecation warnings on import
-from config import HISTORY_YEARS, TOP_SECTORS
+from config import HISTORY_YEARS, MACRO, TOP_SECTORS
 
 
 FALLBACK = {  # used if NSE list download fails
@@ -85,7 +85,44 @@ def load_nifty():
     return n
 
 
-def add_filters(frames, uni, nifty):
+def load_macro():
+    """Daily closes of the market prices news moves (VIX, crude, rupee, US yield, dollar). Empty on failure."""
+    tickers = {"vix": "^INDIAVIX", "crude": "BZ=F", "usdinr": "INR=X", "us10y": "^TNX", "dxy": "DX-Y.NYB"}
+    try:
+        m = yf.download(list(tickers.values()), period=f"{HISTORY_YEARS}y", auto_adjust=True, progress=False)["Close"]
+        m = m.rename(columns={v: k for k, v in tickers.items()})
+    except Exception as e:
+        print(f"[warn] macro data unavailable ({e}); macro filters off")
+        return pd.DataFrame()
+    m.index = pd.to_datetime(m.index).tz_localize(None).normalize()
+    m = m.ffill()
+    # global markets close after NSE, so use the previous day's value for everything but India VIX
+    glob = [c for c in m.columns if c != "vix"]
+    m[glob] = m[glob].shift(1)
+    return m
+
+
+def macro_filters(m, idx):
+    """Market-wide boolean filters on the NSE calendar `idx`. True = calm; False also when data is missing."""
+    if m.empty:
+        return pd.DataFrame(False, index=idx, columns=["vix_calm", "crude_calm", "inr_stable", "yields_calm", "dollar_calm"])
+    m = m.reindex(m.index.union(idx)).ffill().reindex(idx)
+    n = MACRO["lookback"]
+    return pd.DataFrame({
+        # India VIX at or below its 1-year median: no fear spike
+        "vix_calm": m["vix"] <= m["vix"].rolling(252, min_periods=126).median(),
+        # Brent not up sharply: oil shocks (Middle East, supply) hurt India, a big importer
+        "crude_calm": m["crude"].pct_change(n) * 100 < MACRO["crude_up_pct"],
+        # rupee not weakening fast: a proxy for foreign money leaving
+        "inr_stable": m["usdinr"].pct_change(n) * 100 < MACRO["inr_up_pct"],
+        # US 10-year yield (in %) not jumping: pulls FII money out of emerging markets
+        "yields_calm": m["us10y"].diff(n) < MACRO["us10y_up_pts"],
+        # dollar index not surging: global risk-off
+        "dollar_calm": m["dxy"].pct_change(n) * 100 < MACRO["dxy_up_pct"],
+    }, index=idx).fillna(False)
+
+
+def add_filters(frames, uni, nifty, macro=None):
     """Add boolean filter columns to every stock frame. Each uses only data available on that day."""
     close = pd.DataFrame({s: d["Close"] for s, d in frames.items()})
     sma200 = pd.DataFrame({s: d["sma200"] for s, d in frames.items()})
@@ -98,6 +135,7 @@ def add_filters(frames, uni, nifty):
     market_up = (nifty["Close"] > nifty["sma200"]).reindex(close.index).ffill().fillna(False)
     mkt_weak = (nifty["Close"] < nifty["sma50"]).reindex(close.index).ffill().fillna(False)
     n_ret63 = nifty["ret63"].reindex(close.index).ffill()
+    mf = macro_filters(pd.DataFrame() if macro is None else macro, close.index)
     for s, d in frames.items():
         idx = d.index
         d["market_up"] = market_up.reindex(idx).astype(bool).values
@@ -111,3 +149,5 @@ def add_filters(frames, uni, nifty):
         up, dn = delta.clip(lower=0).ewm(alpha=0.5).mean(), (-delta.clip(upper=0)).ewm(alpha=0.5).mean()
         rsi2 = 100 - 100 / (1 + up / dn.replace(0, np.nan))
         d["oversold"] = (rsi2.rolling(3).min() < 15).values
+        for f in mf.columns:
+            d[f] = mf[f].reindex(idx).fillna(False).astype(bool).values

@@ -41,7 +41,16 @@ SETUPS = ["breakout", "pullback", "earnings_gap"]
 
 
 FILTERS = ["market_up", "breadth_ok", "sector_top", "rs_strong", "vol_contraction", "oversold",
-           "deliv_high", "accumulation", "deliv_not_low", "big_buyer"]
+           "deliv_high", "accumulation", "deliv_not_low", "big_buyer",
+           "vix_calm", "crude_calm", "inr_stable", "yields_calm", "dollar_calm"]
+
+
+# ---------- macro filters: market prices that react to news (geopolitics, policy, global risk) ----------
+MACRO = {"lookback": 20,       # trading days over which each change is measured
+         "crude_up_pct": 10,   # crude_calm: Brent up less than this %
+         "inr_up_pct": 1.5,    # inr_stable: USD/INR up less than this % (rupee weakening)
+         "us10y_up_pts": 0.3,  # yields_calm: US 10-year yield up less than this many % points
+         "dxy_up_pct": 2}      # dollar_calm: dollar index up less than this %
 
 
 # ---------- NSE history: delivery %, bulk/block deals, results dates (cached in nse_data/) ----------

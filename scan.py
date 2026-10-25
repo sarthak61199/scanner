@@ -15,7 +15,7 @@ import os
 import re
 import pandas as pd
 from config import CAPITAL, MAX_OPEN, MIN_TURNOVER_CR, RISK_PCT, TEST_MONTHS, TOP
-from data import add_filters, download, enrich, load_nifty, load_universe
+from data import add_filters, download, enrich, load_macro, load_nifty, load_universe
 from nse import add_nse_signals, fundamentals, red_flags
 from backtest import backtest
 from research import load_validated, run_research
@@ -28,7 +28,7 @@ def main():
     uni = load_universe()
     print(f"Downloading {len(uni)} stocks (takes a minute)...")
     frames = {s: enrich(d) for s, d in download(list(uni)).items()}
-    add_filters(frames, uni, load_nifty())
+    add_filters(frames, uni, load_nifty(), load_macro())
     deals = add_nse_signals(frames)
     print(f"Got data for {len(frames)} stocks\n")
 
