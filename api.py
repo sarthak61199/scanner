@@ -26,7 +26,7 @@ async def lifespan(app):
     scheduler.stop()
 
 
-app = FastAPI(title="NSE swing-trade scanner", lifespan=lifespan)
+app = FastAPI(title="Scanner", lifespan=lifespan)
 api = APIRouter(prefix="/api")
 UI_DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui", "dist")
 

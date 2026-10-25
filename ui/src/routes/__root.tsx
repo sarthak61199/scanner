@@ -36,7 +36,7 @@ function RootLayout() {
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
           <Link to="/" className="flex items-center gap-2 font-semibold">
             <ActivityIcon className="size-5" />
-            NSE Scanner
+            Scanner
           </Link>
           <nav className="flex flex-1 items-center gap-1 overflow-x-auto text-sm">
             {NAV.map((n) => (

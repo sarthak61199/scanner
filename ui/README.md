@@ -1,4 +1,4 @@
-# NSE Scanner UI
+# Scanner UI
 
 React + TanStack Router/Query + shadcn (base-ui) + Tailwind. Talks to the FastAPI app under `/api`.
 
