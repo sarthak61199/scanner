@@ -21,6 +21,7 @@ from backtest import backtest
 from research import load_validated, run_research
 from llm import llm_notes
 from report import write_report
+from news import fetch_news, market_mood, mood_text, tag_news
 
 
 def main():
@@ -108,19 +109,30 @@ def main():
     else:
         print(plans.to_string(index=False))
 
-    # 6. Optional LLM commentary
-    notes = {}
+    # 6. Market mood from Mint headlines (archived every run; tagging needs Claude)
+    notes, mood = {}, None
     use_claude = os.getenv("USE_CLAUDE", "true").strip().lower() in ("1", "true", "yes", "on")
+    print("\nFetching Mint news...")
+    fetch_news()
+    if use_claude and os.getenv("ANTHROPIC_API_KEY"):
+        try:
+            tag_news(set(uni.values()))
+            mood = market_mood()
+            print(f"\n=== MARKET MOOD (news, context only) ===\n{mood_text(mood)}")
+        except Exception as e:
+            print(f"\n[warn] news tagging skipped: {e}")
+
+    # 7. Optional LLM commentary
     if use_claude and os.getenv("ANTHROPIC_API_KEY") and not plans.empty:
         try:
-            notes = llm_notes(plans.head(5), funds, stats, validated, pd.DataFrame(all_trades), frames, deals, test_start)
+            notes = llm_notes(plans.head(5), funds, stats, validated, pd.DataFrame(all_trades), frames, deals, test_start, mood)
             conv = {i: (re.search(r"Conviction:\**\s*(HIGH|MEDIUM|LOW)", t, re.I) or [None, "?"])[1].upper()
                     for i, t in notes.items()}
             plans["conviction"] = pd.Series(conv).reindex(plans.index).fillna("-")
         except Exception as e:
             print(f"\n[warn] Claude notes skipped: {e}")
 
-    write_report(sec, validated, plans, df, notes, TOP, funds, rejected)
+    write_report(sec, validated, plans, df, notes, TOP, funds, rejected, mood)
     print("\nSaved report.md")
     print(f"\nRules: max {MAX_OPEN} open trades, {RISK_PCT}% risk each; exits per EXIT_RULES. Not investment advice.")
 

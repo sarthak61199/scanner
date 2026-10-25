@@ -3,3 +3,4 @@
 __pycache__/
 nse_data/
 fund_cache/
+news_cache/

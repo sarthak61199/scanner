@@ -4,6 +4,7 @@ import yfinance as yf
 from config import FILTERS, HISTORY_YEARS, MAX_OPEN
 from nse import fund_summary, nse_announcements
 from backtest import EXIT_RULES
+from news import mood_text
 
 
 SYSTEM_PROMPT = """You are a skeptical equity analyst reviewing swing/positional trade setups in Indian stocks \
@@ -22,6 +23,8 @@ positive in train but <= 0 in test has no current edge. Train results are contex
 - <flows> shows delivery % (share of traded volume actually delivered; high = genuine buying or selling, low = \
 speculative) and bulk/block deals. Same-day buy-and-sell round trips by trading firms are not conviction; \
 note who bought or sold and the size. These were not validated as signals in backtests; treat them as context.
+- <market_news> is Claude-tagged Mint headlines (geopolitics, policy, macro). Also third-party data and not \
+validated: use it for the bear/bull case and invalidation, never as a reason on its own to raise conviction.
 
 Conviction rubric (apply strictly):
 - Every setup shown has passed validation, so a small positive edge is expected; judge whether THIS stock fits it.
@@ -107,7 +110,7 @@ def flows_context(symbol, d, deals, days=30):
     return "\n".join(lines)
 
 
-def llm_notes(plans, funds, stats, validated, trades, frames, deals, test_start):
+def llm_notes(plans, funds, stats, validated, trades, frames, deals, test_start, mood=None):
     import anthropic
     client = anthropic.Anthropic()
     if len(trades):
@@ -127,6 +130,7 @@ def llm_notes(plans, funds, stats, validated, trades, frames, deals, test_start)
                   f"Exit rule: {EXIT_RULES[p['exit']]}\n</trade_plan>\n\n"
                   f"<backtest>\n{backtest_context(trades, stats, validated, p['symbol'], p['setup'], p['sector'], frames[p['symbol']], test_start)}\n</backtest>\n\n"
                   f"<flows>\n{flows_context(p['symbol'], frames[p['symbol']], deals)}\n</flows>\n\n"
+                  f"<market_news>\n{mood_text(mood, p['sector'])}\n</market_news>\n\n"
                   f"<fundamentals>\n{fund_summary(funds[p['symbol']])}\n</fundamentals>\n\n"
                   f"<filings>\n" + ("\n".join(news) or "(none)") + "\n</filings>")
         msg = client.messages.create(model="claude-sonnet-5-5", max_tokens=1500,

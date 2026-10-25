@@ -3,6 +3,7 @@ import pandas as pd
 from config import COST_PCT, MAX_OPEN, RISK_PCT
 from nse import fund_summary
 from backtest import EXIT_RULES
+from news import mood_label, mood_text
 
 
 def md_table(df):
@@ -13,8 +14,13 @@ def md_table(df):
     return "\n".join(lines)
 
 
-def write_report(sec, validated, plans, df, notes, top, funds, rejected):
+def write_report(sec, validated, plans, df, notes, top, funds, rejected, mood=None):
     out = [f"# Market Scan: {pd.Timestamp.now():%Y-%m-%d %H:%M}", ""]
+
+    if mood:
+        out += [f"## Market mood: {mood_label(mood['score'])}", "",
+                "From Claude-tagged Mint headlines. Context only: not a validated signal yet.", "",
+                "".join(("\n" if x.startswith("- ") else "\n\n") + x for x in mood_text(mood).split("\n")).strip(), ""]
 
     out += ["## Sector strength", ""]
     s = sec.head(10).reset_index()

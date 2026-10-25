@@ -107,3 +107,13 @@ MAX_PDFS = 3        # PDFs read per stock
 
 
 PDF_CHARS = 4000    # text kept per PDF
+
+
+# ---------- Mint news (market mood: context only, not a validated signal) ----------
+NEWS_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "news_cache")  # feeds have no history: back this folder up
+
+
+NEWS_FEEDS = ["markets", "companies", "industry", "news", "politics"]
+
+
+MOOD_DAYS = 3       # days of headlines in the market-mood summary
