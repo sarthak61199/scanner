@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import requests
 import yfinance as yf
-warnings.filterwarnings("ignore")  # yfinance re-enables its own deprecation warnings on import
+warnings.filterwarnings("ignore")
 from config import HISTORY_YEARS, MACRO, TOP_SECTORS
 
 
@@ -36,10 +36,18 @@ def load_universe():
         return FALLBACK
 
 
+def yf_download(*args, **kwargs):
+    """yf.download with warnings off: yfinance re-adds its own warning filter during downloads,
+    which lets pandas' inplace deprecation warnings from yfinance's code through."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return yf.download(*args, **kwargs)
+
+
 def download(symbols):
     tickers = [s + ".NS" for s in symbols]
-    data = yf.download(tickers, period=f"{HISTORY_YEARS}y", interval="1d", group_by="ticker",
-                       auto_adjust=True, progress=False, threads=True)
+    data = yf_download(tickers, period=f"{HISTORY_YEARS}y", interval="1d", group_by="ticker",
+                      auto_adjust=True, progress=False, threads=True)
     out = {}
     for s, t in zip(symbols, tickers):
         try:
@@ -75,7 +83,7 @@ def enrich(d):
 
 
 def load_nifty():
-    n = yf.download("^NSEI", period=f"{HISTORY_YEARS}y", auto_adjust=True, progress=False)
+    n = yf_download("^NSEI", period=f"{HISTORY_YEARS}y", auto_adjust=True, progress=False)
     if isinstance(n.columns, pd.MultiIndex):
         n.columns = n.columns.get_level_values(0)
     n = n.dropna()
@@ -89,7 +97,7 @@ def load_macro():
     """Daily closes of the market prices news moves (VIX, crude, rupee, US yield, dollar). Empty on failure."""
     tickers = {"vix": "^INDIAVIX", "crude": "BZ=F", "usdinr": "INR=X", "us10y": "^TNX", "dxy": "DX-Y.NYB"}
     try:
-        m = yf.download(list(tickers.values()), period=f"{HISTORY_YEARS}y", auto_adjust=True, progress=False)["Close"]
+        m = yf_download(list(tickers.values()), period=f"{HISTORY_YEARS}y", auto_adjust=True, progress=False)["Close"]
         m = m.rename(columns={v: k for k, v in tickers.items()})
     except Exception as e:
         print(f"[warn] macro data unavailable ({e}); macro filters off")
