@@ -53,8 +53,7 @@ MACRO = {"lookback": 20,       # trading days over which each change is measured
          "dxy_up_pct": 2}      # dollar_calm: dollar index up less than this %
 
 
-# ---------- NSE history: delivery %, bulk/block deals, results dates (cached in nse_data/) ----------
-NSE_DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nse_data")
+# ---------- NSE history: delivery %, bulk/block deals, results dates (cached in trading.db) ----------
 
 
 EARNINGS_GAP_PCT = 4    # earnings_gap setup: min % rise on the results reaction day
@@ -75,9 +74,6 @@ STOP_WIDTHS = [1.5, 2.0, 3.0]
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db")  # caches + scan/research outputs
 
 
-VALIDATED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "validated_setups.json")
-
-
 RESEARCH_EXITS = ["fixed", "breakeven", "ema_trail", "chandelier"]   # +mkt exits already shown to hurt
 
 
@@ -94,9 +90,6 @@ MAX_OPEN = 5                            # open positions at once (1% risk each)
 
 
 # ---------- fundamentals (NSE integrated filings + shareholding) ----------
-FUND_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fund_cache")
-
-
 MAX_PLEDGE = 20      # % of promoter shares pledged
 
 
@@ -113,9 +106,6 @@ PDF_CHARS = 4000    # text kept per PDF
 
 
 # ---------- Mint news (market mood: context only, not a validated signal) ----------
-NEWS_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "news_cache")  # old file caches: only read by migrate.py
-
-
 NEWS_FEEDS = ["markets", "companies", "industry", "news", "politics"]
 
 

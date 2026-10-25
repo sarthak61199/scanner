@@ -2,7 +2,6 @@
 MVP: Indian stock discovery + timing scanner.
 
   pip install yfinance pandas requests anthropic python-dotenv pypdf fonttools fastapi uvicorn
-  python migrate.py              # once: import old nse_data/, fund_cache/, news_cache/ into trading.db
   python scan.py                 # scan, print report, write report.md, save to trading.db
   RESEARCH=true in .env          # instead: test all setups, save a research run + research.md
   uvicorn api:app                # REST API; runs the same scan/research as background jobs

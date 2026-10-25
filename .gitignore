@@ -1,7 +1,4 @@
 .env
 .venv
 __pycache__/
-nse_data/
-fund_cache/
-news_cache/
 trading.db*
