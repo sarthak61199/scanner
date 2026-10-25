@@ -30,6 +30,7 @@ export type Job = {
   id: number
   kind: JobKind
   status: JobStatus
+  trigger?: "manual" | "schedule"
   created: string
   started: string | null
   finished: string | null
@@ -216,6 +217,70 @@ export type Deal = {
   price: number
 }
 
+export type PaperTrade = {
+  id: number
+  scan_id: number
+  symbol: string
+  sector: string
+  variant: string
+  setup: string
+  filters: string[]
+  exit_rule: string
+  stop_atr: number
+  signal_date: string
+  entry: number
+  initial_stop: number
+  qty: number
+  score: number
+  conviction: "HIGH" | "MEDIUM" | "LOW" | null
+  note: string | null
+  rejected: string | null
+  taken: boolean
+  status: "open" | "closed"
+  current_stop: number | null
+  last_close: number | null
+  exit_date: string | null
+  exit: number | null
+  reason: string | null
+  days: number
+  gross_R: number
+  R: number
+  updated: string
+}
+
+export type JournalGroup = {
+  n: number
+  closed: number
+  open: number
+  avg_r: number | null
+  win: number | null
+  total_r: number
+}
+
+export type JournalStats = {
+  overall: { accepted: JournalGroup; taken: JournalGroup; rejected: JournalGroup }
+  by_setup: {
+    variant: string
+    validated: boolean
+    all: JournalGroup
+    taken: JournalGroup
+    backtest_test_avg_r: number | null
+    backtest_slot_avg_r: number | null
+  }[]
+  by_conviction: Record<"HIGH" | "MEDIUM" | "LOW" | "none", JournalGroup>
+}
+
+export type Schedule = {
+  enabled: boolean
+  scan_time: string
+  research_day: number
+  research_time: string
+  research_max_age: number
+  next_scan: string
+  next_research: string
+  last_scheduled: Pick<Job, "id" | "kind" | "status" | "created">[]
+}
+
 // ---------- calls ----------
 export const api = {
   startJob: (kind: JobKind) => request<Job>("/jobs", { method: "POST", body: JSON.stringify({ kind }) }),
@@ -266,6 +331,9 @@ export const q = {
     }),
   delivery: (symbol: string, days = 90) =>
     queryOptions({ queryKey: ["delivery", symbol, days], queryFn: () => request<Delivery[]>(`/stocks/${symbol}/delivery?days=${days}`) }),
+  journal: () => queryOptions({ queryKey: ["journal"], queryFn: () => request<PaperTrade[]>("/journal") }),
+  journalStats: () => queryOptions({ queryKey: ["journal", "stats"], queryFn: () => request<JournalStats>("/journal/stats") }),
+  schedule: () => queryOptions({ queryKey: ["schedule"], queryFn: () => request<Schedule>("/schedule"), refetchInterval: 60_000 }),
   deals: (symbol: string, days = 90) =>
     queryOptions({ queryKey: ["deals", symbol, days], queryFn: () => request<Deal[]>(`/stocks/${symbol}/deals?days=${days}`) }),
 }

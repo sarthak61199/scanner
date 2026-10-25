@@ -26,6 +26,12 @@ CREATE TABLE IF NOT EXISTS backtest_trades (scan_id INTEGER, symbol TEXT, setup 
                                             exit_date TEXT, entry REAL, exit REAL, reason TEXT, days INTEGER,
                                             gross_R REAL, R REAL, sector TEXT);
 CREATE INDEX IF NOT EXISTS trades_scan ON backtest_trades (scan_id, variant);
+CREATE TABLE IF NOT EXISTS paper_trades (
+    id INTEGER PRIMARY KEY, scan_id INTEGER, symbol TEXT, sector TEXT, variant TEXT, setup TEXT, filters TEXT,
+    exit_rule TEXT, stop_atr REAL, signal_date TEXT, entry REAL, initial_stop REAL, qty INTEGER, score REAL,
+    conviction TEXT, note TEXT, rejected TEXT, taken INTEGER, status TEXT, current_stop REAL, last_close REAL,
+    exit_date TEXT, exit REAL, reason TEXT, days INTEGER, gross_R REAL, R REAL, updated TEXT,
+    UNIQUE (symbol, variant, signal_date));
 CREATE TABLE IF NOT EXISTS research_runs (id INTEGER PRIMARY KEY, job_id INTEGER, created TEXT, test_start TEXT,
                                           rows TEXT, validated TEXT);
 """
@@ -47,6 +53,8 @@ def connect():
 def init_db():
     with connect() as c:
         c.executescript(SCHEMA)
+        if "trigger" not in {r["name"] for r in c.execute("PRAGMA table_info(jobs)")}:  # added after the first release
+            c.execute("ALTER TABLE jobs ADD COLUMN trigger TEXT DEFAULT 'manual'")
 
 
 def clean(x):

@@ -25,6 +25,7 @@ from llm import llm_notes
 from report import write_report
 from news import fetch_news, market_mood, mood_text, tag_news
 from db import connect, dumps
+from journal import open_trades, update_trades
 
 
 def load_data():
@@ -100,11 +101,12 @@ def scan_job(job_id=None):
         print("\nNo validated setups: no edge right now, sit out.")
 
     # 5. Fundamental filter: drop plans whose company shows red flags in NSE filings
-    funds, rejected = {}, []
+    funds, rejected, all_plans = {}, [], plans
     if not plans.empty:
         print("\nChecking fundamentals from NSE filings...")
         funds = {sym: fundamentals(sym) for sym in plans["symbol"].unique()}
         flags = [red_flags(funds[p["symbol"]], p["sector"]) for _, p in plans.iterrows()]
+        all_plans = plans.copy()
         rejected = [(p["symbol"], p["setup"], "; ".join(f)) for (_, p), f in zip(plans.iterrows(), flags) if f]
         plans = plans[[not f for f in flags]].reset_index(drop=True)
         for sym, setup, why in rejected:
@@ -143,6 +145,13 @@ def scan_job(job_id=None):
     write_report(sec, validated, plans, df, notes, TOP, funds, rejected, mood)
     scan_id = save_scan(job_id, sec, plans, df, rejected, funds, mood, notes, all_trades)
     print(f"\nSaved report.md and scan {scan_id}")
+
+    # 8. Paper-trading journal: manage open paper trades first (frees slots), then record today's plans
+    print("\nUpdating paper-trading journal...")
+    update_trades(frames)
+    if not plans.empty:
+        plans["note"] = pd.Series(notes).reindex(plans.index)
+    open_trades(scan_id, all_plans, plans, rejected, frames, validated)
     print(f"\nRules: max {MAX_OPEN} open trades, {RISK_PCT}% risk each; exits per EXIT_RULES. Not investment advice.")
     return scan_id
 

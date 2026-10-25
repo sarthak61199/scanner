@@ -47,13 +47,15 @@ def active():
     return r[0] if r else None
 
 
-def submit(kind):
-    """Queue a 'scan' or 'research' job. Returns the new job id, or None if one is already queued/running."""
+def submit(kind, trigger="manual"):
+    """Queue a 'scan' or 'research' job. Returns the new job id, or None if one is already queued/running.
+    trigger: 'manual' (API/UI) or 'schedule' (scheduler.py)."""
     with _lock:
         if active():
             return None
         with connect() as c:
-            job_id = c.execute("INSERT INTO jobs (kind, status, created) VALUES (?, 'queued', ?)", (kind, _now())).lastrowid
+            job_id = c.execute("INSERT INTO jobs (kind, status, created, trigger) VALUES (?, 'queued', ?, ?)",
+                               (kind, _now(), trigger)).lastrowid
     _pool.submit(_run, job_id, kind)
     return job_id
 

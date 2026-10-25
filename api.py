@@ -9,8 +9,10 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import config
 import jobs
+import scheduler
 from backtest import EXIT_RULES
 from db import clean, loads, rows
+from journal import journal_stats
 from news import list_news, market_mood
 from nse import fundamentals, red_flags
 from research import latest_validated
@@ -19,7 +21,9 @@ from research import latest_validated
 @asynccontextmanager
 async def lifespan(app):
     jobs.recover()
+    scheduler.start()
     yield
+    scheduler.stop()
 
 
 app = FastAPI(title="NSE swing-trade scanner", lifespan=lifespan)
@@ -78,7 +82,8 @@ def create_job(body: JobIn):
 
 @api.get("/jobs")
 def list_jobs(limit: int = 20):
-    return rows("SELECT id, kind, status, created, started, finished, error FROM jobs ORDER BY id DESC LIMIT ?", (limit,))
+    return rows("SELECT id, kind, status, trigger, created, started, finished, error FROM jobs ORDER BY id DESC LIMIT ?",
+                (limit,))
 
 
 @api.get("/jobs/{job_id}")
@@ -155,6 +160,33 @@ def latest_research():
 @api.get("/research/{run_id}")
 def get_research(run_id: int):
     return _research("WHERE id = ?", (run_id,))
+
+
+# ---------- journal & schedule ----------
+@api.get("/journal")
+def journal(status: Literal["open", "closed"] | None = None, variant: str | None = None, taken: bool | None = None):
+    sql, params = "SELECT * FROM paper_trades WHERE 1 = 1", []
+    for col, val in (("status", status), ("variant", variant), ("taken", None if taken is None else int(taken))):
+        if val is not None:
+            sql, params = sql + f" AND {col} = ?", params + [val]
+    out = rows(sql + " ORDER BY signal_date DESC, score DESC", params)
+    for t in out:
+        t["filters"], t["taken"] = loads(t["filters"]), bool(t["taken"])
+    return out
+
+
+@api.get("/journal/stats")
+def journal_summary():
+    return clean(journal_stats())
+
+
+@api.get("/schedule")
+def schedule():
+    n = scheduler.next_runs()
+    return {"enabled": scheduler.enabled(), **config.SCHEDULE,
+            "next_scan": f"{n['scan']:%Y-%m-%d %H:%M} IST", "next_research": f"{n['research']:%Y-%m-%d %H:%M} IST",
+            "last_scheduled": rows("SELECT id, kind, status, created FROM jobs WHERE trigger = 'schedule' "
+                                   "ORDER BY id DESC LIMIT 5")}
 
 
 # ---------- news ----------

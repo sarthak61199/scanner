@@ -1,10 +1,12 @@
 import type { QueryClient } from "@tanstack/react-query"
 import { createRootRouteWithContext, Link, Outlet } from "@tanstack/react-router"
-import { ActivityIcon, MoonIcon, SunIcon } from "lucide-react"
+import { useQuery } from "@tanstack/react-query"
+import { ActivityIcon, ClockIcon, MoonIcon, SunIcon } from "lucide-react"
 
 import { JobControls } from "@/components/job-controls"
 import { useTheme } from "@/components/theme-provider"
 import { Button } from "@/components/ui/button"
+import { q } from "@/lib/api"
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   component: RootLayout,
@@ -13,6 +15,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 const NAV = [
   { to: "/", label: "Today" },
+  { to: "/journal", label: "Journal" },
   { to: "/scans", label: "Scans" },
   { to: "/research", label: "Research" },
   { to: "/news", label: "News" },
@@ -21,6 +24,7 @@ const NAV = [
 
 function RootLayout() {
   const { theme, setTheme } = useTheme()
+  const schedule = useQuery(q.schedule())
   const dark = theme === "dark" || (theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches)
   return (
     <div className="min-h-svh">
@@ -42,6 +46,11 @@ function RootLayout() {
               </Link>
             ))}
           </nav>
+          {schedule.data?.enabled && (
+            <Link to="/jobs" className="hidden items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground md:flex">
+              <ClockIcon className="size-3.5" /> next scan {schedule.data.next_scan.slice(5, 16)}
+            </Link>
+          )}
           <JobControls />
           <Button variant="ghost" size="icon" aria-label="Toggle theme" onClick={() => setTheme(dark ? "light" : "dark")}>
             {dark ? <SunIcon /> : <MoonIcon />}

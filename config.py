@@ -110,3 +110,10 @@ NEWS_FEEDS = ["markets", "companies", "industry", "news", "politics"]
 
 
 MOOD_DAYS = 3       # days of headlines in the market-mood summary
+
+
+# ---------- daily scheduler (runs inside the API server; SCHEDULER=false in .env turns it off) ----------
+SCHEDULE = {"scan_time": "16:30",      # IST, weekdays: after NSE publishes the bhavcopy and deals
+            "research_day": 5,         # Saturday (Monday = 0)
+            "research_time": "09:00",  # IST
+            "research_max_age": 7}     # also rerun research when validated setups are older than this many days

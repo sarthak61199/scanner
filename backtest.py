@@ -4,14 +4,16 @@ import numpy as np
 from config import COST_PCT, MAX_OPEN
 
 
-def simulate_trade(d, i, stop_atr=2.0, exit_rule="fixed", rr=2.0):
+def simulate_trade(d, i, stop_atr=2.0, exit_rule="fixed", rr=2.0, partial=False):
     """Buy at close of day i. Initial stop = stop_atr x ATR below entry. Gaps fill at the open.
     Exit rules:
       fixed       target at rr x risk, exit after 30 days
       breakeven   fixed, but stop moves to entry once the trade is up 1R
       ema_trail   no target; exit on a close below the 20-day EMA (max 60 days)
       chandelier  no target; stop trails highest high - 3 x ATR, only moves up (max 60 days)
-      +mkt        also exit at the close when NIFTY closes below its 50-day average"""
+      +mkt        also exit at the close when NIFTY closes below its 50-day average
+    partial=True (paper journal): a trade still open at the end of the data returns its state, status 'open',
+    instead of None: current stop, last close and mark-to-market R."""
     entry, atr = d["Close"].iat[i], d["atr"].iat[i]
     risk = stop_atr * atr
     if not risk > 0:
@@ -24,7 +26,7 @@ def simulate_trade(d, i, stop_atr=2.0, exit_rule="fixed", rr=2.0):
     o, h, l, c = (d[k].values[sl] for k in ("Open", "High", "Low", "Close"))
     ema, atrs, weak = d["ema20"].values[sl], d["atr"].values[sl], d["mkt_weak"].values[sl]
     if not len(c):
-        return None
+        return _open_state(d, i, entry, risk, stop, entry, 0) if partial else None
     exit_px, reason, days, hh = c[-1], "time", len(c), entry
     for k in range(len(c)):
         if o[k] <= stop:                                   # gapped through the stop
@@ -46,11 +48,17 @@ def simulate_trade(d, i, stop_atr=2.0, exit_rule="fixed", rr=2.0):
             hh = max(hh, h[k])
             stop = max(stop, hh - 3 * atrs[k])
     if reason == "time" and len(c) < max_days:            # still open at the end of the data
-        return None
+        return _open_state(d, i, entry, risk, stop, c[-1], len(c)) if partial else None
     gross = (exit_px - entry) / risk
     cost = entry * COST_PCT / 100 / risk                   # round-trip costs, in R
     return {"date": d.index[i], "exit_date": d.index[i + days], "entry": round(entry, 2), "exit": round(float(exit_px), 2),
-            "reason": reason, "days": days, "gross_R": round(gross, 3), "R": round(gross - cost, 3)}
+            "reason": reason, "days": days, "gross_R": round(gross, 3), "R": round(gross - cost, 3), "status": "closed"}
+
+
+def _open_state(d, i, entry, risk, stop, last, days):
+    gross = (last - entry) / risk
+    return {"date": d.index[i], "entry": round(entry, 2), "stop": round(float(stop), 2), "last": round(float(last), 2),
+            "days": days, "gross_R": round(gross, 3), "R": round(gross - entry * COST_PCT / 100 / risk, 3), "status": "open"}
 
 
 def backtest(frames, setup, filters=(), **kw):
