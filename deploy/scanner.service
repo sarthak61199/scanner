@@ -1,0 +1,13 @@
+[Unit]
+Description=Scanner API
+After=network-online.target
+
+[Service]
+User=deploy
+WorkingDirectory=/opt/scanner
+EnvironmentFile=/opt/scanner/.env
+ExecStart=/opt/scanner/.venv/bin/uvicorn api:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,76 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Build UI
+        working-directory: ui
+        run: |
+          npm ci
+          npm run typecheck
+          npm run lint
+          npm run build
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.15"
+          cache: pip
+
+      - name: Check Python imports
+        run: |
+          pip install -r requirements.txt
+          python -c "import api"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ui-dist
+          path: ui/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: ui-dist
+          path: ui/dist
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DO_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.DO_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Sync code
+        run: |
+          rsync -az --delete \
+            --exclude .git --exclude .github --exclude .venv --exclude .env \
+            --exclude 'trading.db*' --exclude __pycache__ \
+            --exclude ui/node_modules --exclude report.md --exclude research.md \
+            ./ "${{ secrets.DO_USER }}@${{ secrets.DO_HOST }}:/opt/scanner/"
+
+      - name: Install and restart
+        run: |
+          ssh "${{ secrets.DO_USER }}@${{ secrets.DO_HOST }}" 'bash /opt/scanner/deploy/remote.sh'
