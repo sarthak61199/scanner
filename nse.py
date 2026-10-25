@@ -1,23 +1,35 @@
 """NSE data: delivery %, bulk/block deals, results dates, fundamentals (XBRL), announcements and PDFs."""
 import io
 import json
-import os
 import re
 import pandas as pd
 import numpy as np
 import requests
-from config import BIG_BUYER_CR, BIG_BUYER_DAYS, EARNINGS_GAP_PCT, FUND_CACHE, MAX_DE, MAX_PDFS, MAX_PLEDGE, MAX_STAKE_DROP, NSE_DATA, PDF_CHARS
+from config import BIG_BUYER_CR, BIG_BUYER_DAYS, EARNINGS_GAP_PCT, MAX_DE, MAX_PDFS, MAX_PLEDGE, MAX_STAKE_DROP, PDF_CHARS
+from db import connect
+
+
+def _save_day(kind, d, df):
+    """Replace one day's rows in table `kind` (delivery/deals) and mark the day fetched (also when empty: holiday)."""
+    day = f"{d:%Y-%m-%d}"
+    with connect() as c:
+        c.execute(f"DELETE FROM {kind} WHERE date = ?", (day,))
+        if len(df):
+            cols = list(df.columns)
+            c.executemany(f"INSERT OR REPLACE INTO {kind} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                          df.astype(object).where(df.notna(), None).itertuples(index=False, name=None))
+        c.execute("INSERT OR IGNORE INTO fetched_days VALUES (?, ?)", (kind, day))
 
 
 def _fetch_days(kind, days, fetch_one):
-    """Fetch per-day files into nse_data/<kind>/YYYYMMDD.csv, skipping days already cached.
+    """Fetch per-day data into table `kind`, skipping days already fetched.
     The last 2 days are always refetched (data may still be published late)."""
     from concurrent.futures import ThreadPoolExecutor
-    folder = os.path.join(NSE_DATA, kind)
-    os.makedirs(folder, exist_ok=True)
     recent = set(sorted(days)[-2:])
     blocked = []
-    todo = [d for d in days if d in recent or not os.path.exists(os.path.join(folder, f"{d:%Y%m%d}.csv"))]
+    with connect() as c:
+        done = {r[0] for r in c.execute("SELECT date FROM fetched_days WHERE kind = ?", (kind,))}
+    todo = [d for d in days if d in recent or f"{d:%Y-%m-%d}" not in done]
     if todo:
         print(f"  fetching {kind} for {len(todo)} days...")
 
@@ -27,7 +39,7 @@ def _fetch_days(kind, days, fetch_one):
             return
         for attempt in range(4):  # NSE rate-limits bursts; back off and retry
             try:
-                fetch_one(d).to_csv(os.path.join(folder, f"{d:%Y%m%d}.csv"), index=False)
+                _save_day(kind, d, fetch_one(d))
                 return
             except PermissionError:
                 blocked.append(d)
@@ -39,12 +51,12 @@ def _fetch_days(kind, days, fetch_one):
             print(f"  [warn] {kind} {d:%Y-%m-%d}: {err}")
     with ThreadPoolExecutor(3) as ex:
         list(ex.map(job, todo))
-    if blocked:
-        missing = sum(not os.path.exists(os.path.join(folder, f"{d:%Y%m%d}.csv")) for d in days)
-        print(f"  [warn] NSE denied access to {kind} (403); {missing} days missing, will retry next run")
-    parts = [pd.read_csv(os.path.join(folder, f)) for f in sorted(os.listdir(folder)) if f.endswith(".csv")]
-    parts = [x for x in parts if len(x)]
-    return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+    with connect() as c:
+        if blocked:
+            done = {r[0] for r in c.execute("SELECT date FROM fetched_days WHERE kind = ?", (kind,))}
+            missing = sum(f"{d:%Y-%m-%d}" not in done for d in days)
+            print(f"  [warn] NSE denied access to {kind} (403); {missing} days missing, will retry next run")
+        return pd.read_sql(f"SELECT * FROM {kind} WHERE date >= ?", c, params=(f"{min(days):%Y-%m-%d}",))
 
 
 def load_delivery(days):
@@ -92,18 +104,11 @@ def load_results_dates(symbols, recent_days=10):
     """Datetimes of financial-results announcements per symbol. Full history is fetched once per stock;
     after that, one call for all companies over the last `recent_days` keeps it current."""
     from concurrent.futures import ThreadPoolExecutor
-    folder = os.path.join(NSE_DATA, "results")
-    os.makedirs(folder, exist_ok=True)
-
-    def path(sym):
-        return os.path.join(folder, f"{sym}.json")
-
-    def cached(sym):
-        try:
-            with open(path(sym)) as f:
-                return json.load(f)["dates"]
-        except Exception:
-            return None
+    with connect() as c:
+        have = {r[0] for r in c.execute("SELECT symbol FROM results_fetched")}
+        known = {}
+        for sym, ts in c.execute("SELECT symbol, announced_at FROM results_dates"):
+            known.setdefault(sym, []).append(ts)
 
     def full(sym):
         try:
@@ -114,7 +119,7 @@ def load_results_dates(symbols, recent_days=10):
             print(f"  [warn] results dates {sym}: {e}")
             return sym, None
 
-    out = {sym: cached(sym) for sym in symbols}
+    out = {sym: sorted(known.get(sym, [])) if sym in have else None for sym in symbols}
     missing = [sym for sym, v in out.items() if v is None]
     if missing:
         print(f"  fetching results history for {len(missing)} stocks...")
@@ -131,9 +136,9 @@ def load_results_dates(symbols, recent_days=10):
                 out[x["symbol"]] = sorted(set(out[x["symbol"]]) | {x["an_dt"]})
     except Exception as e:
         print(f"  [warn] recent results announcements: {e}")
-    for sym, dates in out.items():
-        with open(path(sym), "w") as f:
-            json.dump({"dates": dates}, f)
+    with connect() as c:
+        c.executemany("INSERT OR IGNORE INTO results_fetched VALUES (?)", [(s,) for s in out])
+        c.executemany("INSERT OR IGNORE INTO results_dates VALUES (?, ?)", [(s, t) for s, ds in out.items() for t in ds])
     return out
 
 
@@ -234,14 +239,10 @@ def _cr(v):
 def fundamentals(symbol, quarters=5):
     """Last few quarters of results, promoter holding and pledge from NSE. Cached for the day."""
     today = str(pd.Timestamp.now().date())
-    path = os.path.join(FUND_CACHE, f"{symbol}.json")
-    try:
-        with open(path) as f:
-            c = json.load(f)
-        if c.get("date") == today:
-            return c
-    except Exception:
-        pass
+    with connect() as c:
+        r = c.execute("SELECT data FROM fundamentals WHERE symbol = ? AND date = ?", (symbol, today)).fetchone()
+    if r:
+        return json.loads(r[0])
     s = _session()
     out = {"date": today, "symbol": symbol, "quarters": [], "promoter": [], "pledge_pct": None}
 
@@ -280,9 +281,8 @@ def fundamentals(symbol, quarters=5):
     except Exception as e:
         print(f"[warn] shareholding unavailable for {symbol}: {e}")
 
-    os.makedirs(FUND_CACHE, exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(out, f)
+    with connect() as c:
+        c.execute("INSERT OR REPLACE INTO fundamentals VALUES (?, ?, ?)", (symbol, today, json.dumps(out)))
     return out
 
 

@@ -1,4 +1,28 @@
-# Market Scan: 2026-10-25 15:22
+# Market Scan: 2026-10-25 16:20
+
+## Market mood: mixed
+
+From Claude-tagged Mint headlines. Context only: not a validated signal yet.
+
+Mint headlines, last 3 days: 38 market-relevant, average impact -0.08 on a -2..+2 scale (mixed).
+
+By driver (headlines, net impact): commodities 4 (-5), geopolitics 10 (-4), global_markets 2 (-1), rbi_rates 3 (-1), macro_data 1 (+1), sector 8 (+2), govt_policy 10 (+5)
+
+Most negative:
+- [2026-10-25 15:38] (commodities, -2) Bank Nifty tumbles nearly 3%, slips below 55k: More selling pressure ahead for banking stocks? Check key levels to watch
+- [2026-10-25 08:56] (geopolitics, -2) US-Iran war: Trump warns of fresh strikes on Tehran, says attack could come ‘tomorrow’
+- [2026-10-25 13:18] (commodities, -1) Gold price crashes over  ₹38,600 from record high — What'll happen amid Diwali 2026 fervour? Right time to buy? Decoded
+- [2026-10-25 12:33] (geopolitics, -1) Trump hints at an Iran attack or deal! Impact on India stock market, Sensex, Nifty, gold decoded; top 10 stocks to watch
+- [2026-10-24 17:35] (commodities, -1) Silver price has broken below  ₹2 lakh for the first time since December 2025: Is this the right time to buy for returns?
+- [2026-10-24 12:07] (commodities, -1) Gold rates in Chennai city crash this week: Can yellow metal rebound ahead of Diwali - Key levels to watch in future?
+
+Most positive:
+- [2026-10-25 11:52] (sector, +1) How Gen Z is driving festival travel trend: Hotel bookings up 135% for Diwali—Bangalore, Jaipur, Taipei, Cebu see growth
+- [2026-10-24 18:53] (govt_policy, +1) IDBI Bank sale: Employees’ service conditions to remain unchanged, says DIPAM Secretary
+- [2026-10-24 14:03] (govt_policy, +1) Indian Overseas Bank privatisation: What is the buzz about? Centre's rules and regulations for the process, explained
+- [2026-10-24 07:06] (macro_data, +1) Wheat crop area unlikely to shrink this season, raising hopes of another bumper harvest: govt official
+- [2026-10-24 05:50] (govt_policy, +1) Government weighs  ₹40,000-crore plan to modernise textile clusters over five years
+- [2026-10-23 20:24] (govt_policy, +1) Goa cuts ATF VAT to 7% from 15% effective October 24: Will flight fares drop? All you need to know
 
 ## Sector strength
 
@@ -21,7 +45,7 @@ Only setups that passed research mode (see research.md) are scanned. R after 0.2
 
 | setup | exit | stop | train trades | train avgR | test trades | test avgR | 5-slot test avgR | test DD (R) | researched |
 |---|---|---|---|---|---|---|---|---|---|
-| breakout+deliv_not_low | chandelier | 2.0xATR | 1457 | 0.369 | 338 | 0.154 | 0.145 | 12.0 | 2026-10-25 |
+| breakout+deliv_not_low | chandelier | 2.0xATR | 1458 | 0.369 | 338 | 0.154 | 0.145 | 12.0 | 2026-10-25 |
 | pullback+accumulation | chandelier | 1.5xATR | 1951 | 0.425 | 485 | 0.009 | 0.339 | 11.8 | 2026-10-25 |
 
 Exit rules:

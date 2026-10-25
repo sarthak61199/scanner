@@ -1,9 +1,11 @@
 """
 MVP: Indian stock discovery + timing scanner.
 
-  pip install yfinance pandas requests anthropic python-dotenv pypdf fonttools
-  python scan.py                 # scan, print report, write report.md
-  RESEARCH=true in .env          # instead: test all setups, write validated_setups.json + research.md
+  pip install yfinance pandas requests anthropic python-dotenv pypdf fonttools fastapi uvicorn
+  python migrate.py              # once: import old nse_data/, fund_cache/, news_cache/ into trading.db
+  python scan.py                 # scan, print report, write report.md, save to trading.db
+  RESEARCH=true in .env          # instead: test all setups, save a research run + research.md
+  uvicorn api:app                # REST API; runs the same scan/research as background jobs
   Settings: edit config.py. Files: config, data, nse, backtest, research, llm, report.
 
 Pipeline: universe -> sector strength -> stock ranking -> setup detection
@@ -22,20 +24,27 @@ from research import load_validated, run_research
 from llm import llm_notes
 from report import write_report
 from news import fetch_news, market_mood, mood_text, tag_news
+from db import connect, dumps
 
 
-def main():
-
+def load_data():
+    """Universe, prices with indicators/filters/NSE signals for every stock, and bulk/block deals."""
     uni = load_universe()
     print(f"Downloading {len(uni)} stocks (takes a minute)...")
     frames = {s: enrich(d) for s, d in download(list(uni)).items()}
     add_filters(frames, uni, load_nifty(), load_macro())
     deals = add_nse_signals(frames)
     print(f"Got data for {len(frames)} stocks\n")
+    return uni, frames, deals
 
-    if os.getenv("RESEARCH", "false").strip().lower() in ("1", "true", "yes", "on"):
-        run_research(frames)
-        return
+
+def research_job(job_id=None):
+    return run_research(load_data()[1], job_id)
+
+
+def scan_job(job_id=None):
+    """Full scan; saves it to the scans table and report.md. Returns the scan id."""
+    uni, frames, deals = load_data()
     validated = load_validated()
 
     # 1. Sector strength: median 3m & 6m return of members
@@ -70,7 +79,6 @@ def main():
         all_trades += [{**t, "sector": uni[t["symbol"]]} for t in tr]
         print(f"  {v['key']:28s} {v['exit']:10s} stop {v['stop_atr']}xATR  test avgR {v['test']['avg_r']}  "
               f"{MAX_OPEN}-slot test avgR {v['test']['taken_avg_r']}")
-    pd.DataFrame(all_trades).to_csv("backtest_trades.csv", index=False)
 
     # 4. Trade plans: stocks where a validated setup triggered today, ranked by score
     risk_amt = CAPITAL * RISK_PCT / 100
@@ -133,8 +141,36 @@ def main():
             print(f"\n[warn] Claude notes skipped: {e}")
 
     write_report(sec, validated, plans, df, notes, TOP, funds, rejected, mood)
-    print("\nSaved report.md")
+    scan_id = save_scan(job_id, sec, plans, df, rejected, funds, mood, notes, all_trades)
+    print(f"\nSaved report.md and scan {scan_id}")
     print(f"\nRules: max {MAX_OPEN} open trades, {RISK_PCT}% risk each; exits per EXIT_RULES. Not investment advice.")
+    return scan_id
+
+
+def save_scan(job_id, sec, plans, df, rejected, funds, mood, notes, trades):
+    watch = df.sort_values("score", ascending=False).head(TOP)[["sym", "sector", "score", "close"]]
+    cols = ["symbol", "setup", "variant", "mom", "date", "exit_date", "entry", "exit", "reason", "days", "gross_R", "R", "sector"]
+    t = pd.DataFrame(trades, columns=cols)
+    for c in ("date", "exit_date"):
+        t[c] = pd.to_datetime(t[c]).dt.strftime("%Y-%m-%d")
+    with connect() as c:
+        scan_id = c.execute(
+            "INSERT INTO scans (job_id, created, sectors, plans, watchlist, rejected, funds, mood, notes) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (job_id, f"{pd.Timestamp.now():%Y-%m-%d %H:%M:%S}", dumps(sec.reset_index().to_dict("records")),
+             dumps(plans.to_dict("records")), dumps(watch.to_dict("records")),
+             dumps([{"symbol": s, "setup": k, "red_flags": w} for s, k, w in rejected]), dumps(funds), dumps(mood),
+             dumps({plans.loc[i, "symbol"] + "|" + plans.loc[i, "setup"]: v for i, v in notes.items()}))).lastrowid
+        c.executemany(f"INSERT INTO backtest_trades VALUES (?, {', '.join('?' * len(cols))})",
+                      [(scan_id, *r) for r in t.astype(object).where(t.notna(), None).itertuples(index=False, name=None)])
+    return scan_id
+
+
+def main():
+    if os.getenv("RESEARCH", "false").strip().lower() in ("1", "true", "yes", "on"):
+        research_job()
+    else:
+        scan_job()
 
 
 if __name__ == "__main__":

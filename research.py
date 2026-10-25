@@ -1,10 +1,9 @@
-"""Research mode: test every setup x filter x exit x stop, keep what passes -> validated_setups.json."""
-import json
-import os
+"""Research mode: test every setup x filter x exit x stop, keep what passes -> research_runs table."""
 import pandas as pd
-from config import COST_PCT, FILTERS, MAX_OPEN, MAX_TEST_DD_R, MIN_TEST_N, MIN_TEST_R, MIN_TRAIN_N, MIN_TRAIN_R, RESEARCH_EXITS, SETUPS, STOP_WIDTHS, TEST_MONTHS, VALIDATED
+from config import COST_PCT, FILTERS, MAX_OPEN, MAX_TEST_DD_R, MIN_TEST_N, MIN_TEST_R, MIN_TRAIN_N, MIN_TRAIN_R, RESEARCH_EXITS, SETUPS, STOP_WIDTHS, TEST_MONTHS
 from backtest import backtest, capped_trades, risk_stats
 from report import md_table
+from db import connect, dumps, loads
 
 
 def _part_stats(t):
@@ -74,23 +73,27 @@ def pick_validated(rows):
     return out
 
 
-def run_research(frames):
+def run_research(frames, job_id=None):
     last_day = max(d.index[-1] for d in frames.values())
     test_start = last_day - pd.DateOffset(months=TEST_MONTHS)
     n = len(SETUPS) * (len(FILTERS) + 1) * len(RESEARCH_EXITS) * len(STOP_WIDTHS)
     print(f"Research: {n} combinations (train: before {test_start:%Y-%m-%d}, test: after)...")
     rows = research(frames, test_start)
     chosen = pick_validated(rows)
-    with open(VALIDATED, "w") as f:
-        json.dump({"generated": f"{pd.Timestamp.today():%Y-%m-%d}", "test_start": f"{test_start:%Y-%m-%d}",
-                   "rules": {"min_train_n": MIN_TRAIN_N, "min_train_avg_r": MIN_TRAIN_R, "min_test_n": MIN_TEST_N,
-                             "min_test_avg_r": MIN_TEST_R, "max_test_dd_r": MAX_TEST_DD_R},
-                   "setups": [{k: r[k] for k in ("setup", "filters", "exit", "stop_atr", "train", "test",
-                                                 "train_ex_best_year", "by_year")} for r in chosen]}, f, indent=2)
+    validated = {"generated": f"{pd.Timestamp.today():%Y-%m-%d}", "test_start": f"{test_start:%Y-%m-%d}",
+                 "rules": {"min_train_n": MIN_TRAIN_N, "min_train_avg_r": MIN_TRAIN_R, "min_test_n": MIN_TEST_N,
+                           "min_test_avg_r": MIN_TEST_R, "max_test_dd_r": MAX_TEST_DD_R},
+                 "setups": [{k: r[k] for k in ("setup", "filters", "exit", "stop_atr", "train", "test",
+                                               "train_ex_best_year", "by_year")} for r in chosen]}
+    with connect() as c:
+        run_id = c.execute("INSERT INTO research_runs (job_id, created, test_start, rows, validated) VALUES (?, ?, ?, ?, ?)",
+                           (job_id, f"{pd.Timestamp.now():%Y-%m-%d %H:%M:%S}", validated["test_start"],
+                            dumps(rows), dumps(validated))).lastrowid
     write_research_report(rows, chosen, test_start)
     print(f"\n{len([r for r in rows if not r['fails']])} of {len(rows)} combinations passed; "
           f"validated: {[' '.join(['+'.join([r['setup'], *r['filters']]), r['exit'], str(r['stop_atr'])]) for r in chosen] or 'none'}")
-    print(f"Saved {os.path.basename(VALIDATED)} and research.md")
+    print(f"Saved research run {run_id} and research.md")
+    return run_id
 
 
 def write_research_report(rows, chosen, test_start):
@@ -113,7 +116,7 @@ def write_research_report(rows, chosen, test_start):
              f"and taken_avgR must also be >= {MIN_TEST_R}); "
              "a filter must beat the unfiltered setup (same exit/stop) in test.", "",
              f"{len(rows)} combinations tested. Note: testing many combinations means some pass by luck.", "",
-             "## Validated (saved to validated_setups.json)", ""]
+             "## Validated (saved to the database)", ""]
     lines += [md_table(pd.DataFrame([flat(r) for r in chosen])), ""] if chosen else \
              ["**None.** No setup has a validated edge right now - the daily scan should sit out.", ""]
     lines += [f"## All passing combinations ({len(passed)})", ""]
@@ -126,10 +129,9 @@ def write_research_report(rows, chosen, test_start):
 
 def load_validated(max_age_days=30):
     """Setups that passed research mode. Each gets key 'setup+filter'."""
-    if not os.path.exists(VALIDATED):
-        raise SystemExit(f"{os.path.basename(VALIDATED)} not found. Run once with RESEARCH=true in .env first.")
-    with open(VALIDATED) as f:
-        v = json.load(f)
+    v = latest_validated()
+    if v is None:
+        raise RuntimeError("No research run in the database. Run research first (RESEARCH=true, or POST /jobs).")
     age = (pd.Timestamp.today() - pd.Timestamp(v["generated"])).days
     if age > max_age_days:
         print(f"[warn] validated setups are {age} days old - rerun with RESEARCH=true")
@@ -138,3 +140,10 @@ def load_validated(max_age_days=30):
         x["generated"] = v["generated"]
     print("Validated setups: " + (", ".join(f"{x['key']} ({x['exit']}, {x['stop_atr']}xATR)" for x in v["setups"]) or "none"))
     return v["setups"]
+
+
+def latest_validated():
+    """The validated-setups record of the newest research run, or None."""
+    with connect() as c:
+        r = c.execute("SELECT validated FROM research_runs ORDER BY id DESC LIMIT 1").fetchone()
+    return loads(r[0]) if r else None

@@ -72,6 +72,9 @@ EXITS = ["fixed", "breakeven", "ema_trail", "chandelier", "fixed+mkt", "chandeli
 STOP_WIDTHS = [1.5, 2.0, 3.0]
 
 
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db")  # caches + scan/research outputs
+
+
 VALIDATED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "validated_setups.json")
 
 
@@ -110,7 +113,7 @@ PDF_CHARS = 4000    # text kept per PDF
 
 
 # ---------- Mint news (market mood: context only, not a validated signal) ----------
-NEWS_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "news_cache")  # feeds have no history: back this folder up
+NEWS_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "news_cache")  # old file caches: only read by migrate.py
 
 
 NEWS_FEEDS = ["markets", "companies", "industry", "news", "politics"]
