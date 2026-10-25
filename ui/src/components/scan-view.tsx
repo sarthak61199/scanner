@@ -1,9 +1,8 @@
 import { Fragment, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
+import { getRouteApi, Link } from "@tanstack/react-router"
 import { ChevronDownIcon } from "lucide-react"
 
-import { q, type Plan, type Scan } from "@/lib/api"
+import type { Plan, Scan } from "@/lib/api"
 import { num, pct, rClass, rupees, signed, timeAgo } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
@@ -11,6 +10,8 @@ import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Empty, Section, Stat } from "@/components/common"
 import { MoodCard } from "@/components/mood"
+
+const root = getRouteApi("__root__")
 
 const CONVICTION: Record<string, string> = {
   HIGH: "border-positive/40 text-positive",
@@ -107,8 +108,7 @@ function PlansTable({ plans }: { plans: Plan[] }) {
 }
 
 export function ScanView({ scan }: { scan: Scan }) {
-  const validated = useQuery(q.validated())
-  const config = useQuery(q.config())
+  const { validated, config } = root.useLoaderData()
   const top = scan.sectors[0]
   return (
     <div className="space-y-6">
@@ -116,16 +116,14 @@ export function ScanView({ scan }: { scan: Scan }) {
         <Stat label="Trade plans" value={scan.plans.length} hint={`${scan.rejected.length} rejected on fundamentals`} />
         <Stat
           label="Validated setups"
-          value={validated.data?.setups.length ?? "–"}
-          hint={validated.data ? `researched ${validated.data.age_days}d ago` : undefined}
+          value={validated?.setups.length ?? "–"}
+          hint={validated ? `researched ${validated.age_days}d ago` : undefined}
         />
         <Stat label="Strongest sector" value={<span className="text-base">{top?.sector ?? "–"}</span>} hint={top && `3m ${pct(top.ret63)}`} />
         <Stat
           label="Scanned"
           value={<span className="text-base">{timeAgo(scan.created)}</span>}
-          hint={
-            config.data && `${config.data.risk_pct}% risk/trade · max ${config.data.max_open} open · ₹${config.data.capital.toLocaleString("en-IN")}`
-          }
+          hint={`${config.risk_pct}% risk/trade · max ${config.max_open} open · ₹${config.capital.toLocaleString("en-IN")}`}
         />
       </div>
 

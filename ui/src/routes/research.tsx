@@ -1,8 +1,7 @@
 import { useMemo, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 
-import { q, type ResearchRow, type Validated } from "@/lib/api"
+import { api, type ResearchRow, type Validated } from "@/lib/api"
 import { num, pct, rClass, signed } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
@@ -10,16 +9,20 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Empty, ErrorState, isNotFound, Loading, PageHeader, Section } from "@/components/common"
+import { Empty, PageHeader, Section } from "@/components/common"
 
 export const Route = createFileRoute("/research")({
+  loader: () => api.research("latest"),
+  staleTime: 5 * 60_000, // changes only when a research job finishes (which invalidates everything)
   component: Research,
 })
+
+const root = getRouteApi("__root__")
 
 const key = (r: { setup: string; filters: string[] }) => [r.setup, ...r.filters].join("+")
 
 function ValidatedCards({ v }: { v: Validated }) {
-  const config = useQuery(q.config())
+  const { config } = root.useLoaderData()
   if (!v.setups.length) return <Empty>No setup passed. The scanner sits out until one does.</Empty>
   return (
     <div className="grid gap-4 md:grid-cols-2">
@@ -29,7 +32,7 @@ function ValidatedCards({ v }: { v: Validated }) {
             <CardTitle>{key(s)}</CardTitle>
             <CardDescription>
               {s.exit} exit, {s.stop_atr}×ATR stop
-              {config.data?.exit_rules[s.exit] && <span className="block pt-1">{config.data.exit_rules[s.exit]}</span>}
+              {config.exit_rules[s.exit] && <span className="block pt-1">{config.exit_rules[s.exit]}</span>}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -38,7 +41,7 @@ function ValidatedCards({ v }: { v: Validated }) {
                 [
                   ["Train avg R", s.train.avg_r, `${s.train.n} trades`],
                   ["Test avg R", s.test.avg_r, `${s.test.n} trades, ${pct(s.test.win, 0)} win`],
-                  [`${config.data?.max_open ?? 5}-slot test`, s.test.taken_avg_r, `DD ${num(s.test.max_dd_r, 1)}R`],
+                  [`${config.max_open}-slot test`, s.test.taken_avg_r, `DD ${num(s.test.max_dd_r, 1)}R`],
                 ] as const
               ).map(([label, value, hint]) => (
                 <div key={label}>
@@ -134,24 +137,20 @@ function AllRows({ rows }: { rows: ResearchRow[] }) {
 }
 
 function Research() {
-  const run = useQuery(q.research("latest"))
-  const v = run.data?.validated
+  const run = Route.useLoaderData()
+  const v = run?.validated
   return (
     <>
       <PageHeader
         title="Research"
         description={
-          run.data
-            ? `Run #${run.data.id} · ${run.data.created} · train before ${run.data.test_start}, test after (held out)`
+          run
+            ? `Run #${run.id} · ${run.created} · train before ${run.test_start}, test after (held out)`
             : "Every setup × filter × exit × stop width, tested on train and held-out test periods."
         }
       />
-      {run.isPending ? (
-        <Loading rows={6} />
-      ) : isNotFound(run.error) ? (
+      {!run ? (
         <Empty>No research run yet. Press “Research” to run one (a few minutes).</Empty>
-      ) : run.error ? (
-        <ErrorState error={run.error} />
       ) : (
         <div className="space-y-6">
           {v && (
@@ -165,7 +164,7 @@ function Research() {
               <ValidatedCards v={v} />
             </div>
           )}
-          {run.data.rows ? <AllRows rows={run.data.rows} /> : <Empty>This run has no per-combination results.</Empty>}
+          {run.rows ? <AllRows rows={run.rows} /> : <Empty>This run has no per-combination results.</Empty>}
         </div>
       )}
     </>

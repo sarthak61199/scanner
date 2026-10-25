@@ -1,7 +1,6 @@
 import type { ReactNode } from "react"
 import { AlertCircleIcon } from "lucide-react"
 
-import { ApiError } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -78,5 +77,3 @@ export function ErrorState({ error }: { error: unknown }) {
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">{children}</div>
 }
-
-export const isNotFound = (e: unknown) => e instanceof ApiError && e.status === 404

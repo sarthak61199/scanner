@@ -1,5 +1,3 @@
-import { queryOptions } from "@tanstack/react-query"
-
 // Same origin: FastAPI serves this UI and the API under /api (Vite proxies it in dev).
 export class ApiError extends Error {
   status: number
@@ -282,58 +280,43 @@ export type Schedule = {
 }
 
 // ---------- calls ----------
-export const api = {
-  startJob: (kind: JobKind) => request<Job>("/jobs", { method: "POST", body: JSON.stringify({ kind }) }),
+/** null instead of an error when the resource doesn't exist yet (no scan / research run so far). */
+async function orNull<T>(p: Promise<T>): Promise<T | null> {
+  try {
+    return await p
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null
+    throw e
+  }
 }
 
-const isActive = (j?: Job) => j?.status === "queued" || j?.status === "running"
+const qs = (params: Record<string, string | number | undefined>) => {
+  const p = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== "") p.set(k, String(v))
+  const s = p.toString()
+  return s ? `?${s}` : ""
+}
 
-export const q = {
-  health: () => queryOptions({ queryKey: ["health"], queryFn: () => request<Health>("/health") }),
-  config: () => queryOptions({ queryKey: ["config"], queryFn: () => request<Config>("/config"), staleTime: Infinity }),
-  jobs: () =>
-    queryOptions({
-      queryKey: ["jobs"],
-      queryFn: () => request<Job[]>("/jobs?limit=50"),
-      refetchInterval: (query) => (query.state.data?.some(isActive) ? 3000 : false),
-    }),
-  job: (id: number) =>
-    queryOptions({
-      queryKey: ["jobs", id],
-      queryFn: () => request<Job>(`/jobs/${id}`),
-      refetchInterval: (query) => (isActive(query.state.data) ? 2000 : false),
-    }),
-  scans: () => queryOptions({ queryKey: ["scans"], queryFn: () => request<ScanSummary[]>("/scans?limit=100") }),
-  scan: (id: number | "latest") => queryOptions({ queryKey: ["scans", id], queryFn: () => request<Scan>(`/scans/${id}`) }),
-  trades: (scanId: number, setup?: string, symbol?: string) => {
-    const p = new URLSearchParams()
-    if (setup) p.set("setup", setup)
-    if (symbol) p.set("symbol", symbol)
-    return queryOptions({
-      queryKey: ["scans", scanId, "trades", setup, symbol],
-      queryFn: () => request<Trade[]>(`/scans/${scanId}/trades?${p}`),
-    })
-  },
-  validated: () => queryOptions({ queryKey: ["validated"], queryFn: () => request<Validated>("/setups/validated") }),
-  research: (id: number | "latest") =>
-    queryOptions({ queryKey: ["research", id], queryFn: () => request<ResearchRun>(`/research/${id}`) }),
-  news: (days: number, category?: string) =>
-    queryOptions({
-      queryKey: ["news", days, category],
-      queryFn: () => request<Headline[]>(`/news?days=${days}${category ? `&category=${category}` : ""}`),
-    }),
-  mood: (days: number) => queryOptions({ queryKey: ["mood", days], queryFn: () => request<Mood | null>(`/news/mood?days=${days}`) }),
-  fundamentals: (symbol: string, sector = "") =>
-    queryOptions({
-      queryKey: ["fundamentals", symbol, sector],
-      queryFn: () => request<Fundamentals>(`/stocks/${symbol}/fundamentals?sector=${encodeURIComponent(sector)}`),
-      staleTime: 60 * 60 * 1000,
-    }),
-  delivery: (symbol: string, days = 90) =>
-    queryOptions({ queryKey: ["delivery", symbol, days], queryFn: () => request<Delivery[]>(`/stocks/${symbol}/delivery?days=${days}`) }),
-  journal: () => queryOptions({ queryKey: ["journal"], queryFn: () => request<PaperTrade[]>("/journal") }),
-  journalStats: () => queryOptions({ queryKey: ["journal", "stats"], queryFn: () => request<JournalStats>("/journal/stats") }),
-  schedule: () => queryOptions({ queryKey: ["schedule"], queryFn: () => request<Schedule>("/schedule"), refetchInterval: 60_000 }),
-  deals: (symbol: string, days = 90) =>
-    queryOptions({ queryKey: ["deals", symbol, days], queryFn: () => request<Deal[]>(`/stocks/${symbol}/deals?days=${days}`) }),
+export const isActive = (j?: Pick<Job, "status">) => j?.status === "queued" || j?.status === "running"
+
+export const api = {
+  startJob: (kind: JobKind) => request<Job>("/jobs", { method: "POST", body: JSON.stringify({ kind }) }),
+  health: () => request<Health>("/health"),
+  config: () => request<Config>("/config"),
+  schedule: () => request<Schedule>("/schedule"),
+  jobs: () => request<Job[]>("/jobs?limit=50"),
+  job: (id: number) => request<Job>(`/jobs/${id}`),
+  scans: () => request<ScanSummary[]>("/scans?limit=100"),
+  scan: (id: number | "latest") => orNull(request<Scan>(`/scans/${id}`)),
+  trades: (scanId: number, setup?: string, symbol?: string) =>
+    request<Trade[]>(`/scans/${scanId}/trades${qs({ setup, symbol })}`),
+  validated: () => orNull(request<Validated>("/setups/validated")),
+  research: (id: number | "latest") => orNull(request<ResearchRun>(`/research/${id}`)),
+  news: (days: number, category?: string) => request<Headline[]>(`/news${qs({ days, category })}`),
+  mood: (days: number) => request<Mood | null>(`/news/mood?days=${days}`),
+  journal: () => request<PaperTrade[]>("/journal"),
+  journalStats: () => request<JournalStats>("/journal/stats"),
+  fundamentals: (symbol: string, sector = "") => request<Fundamentals>(`/stocks/${symbol}/fundamentals${qs({ sector })}`),
+  delivery: (symbol: string, days = 90) => request<Delivery[]>(`/stocks/${symbol}/delivery?days=${days}`),
+  deals: (symbol: string, days = 90) => request<Deal[]>(`/stocks/${symbol}/deals?days=${days}`),
 }

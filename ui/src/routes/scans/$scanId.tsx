@@ -1,60 +1,66 @@
 import { useState } from "react"
-import { useQuery } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, getRouteApi, notFound, useNavigate } from "@tanstack/react-router"
 
-import { q } from "@/lib/api"
+import { api } from "@/lib/api"
 import { num, rClass, signed } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Empty, ErrorState, Loading, PageHeader, Section } from "@/components/common"
+import { Empty, PageHeader, Section } from "@/components/common"
 import { ScanView, StockLink } from "@/components/scan-view"
 
+type Search = { setup?: string; symbol?: string }
+
 export const Route = createFileRoute("/scans/$scanId")({
+  validateSearch: (s: Record<string, unknown>): Search => ({
+    setup: typeof s.setup === "string" && s.setup ? s.setup : undefined,
+    symbol: typeof s.symbol === "string" && s.symbol ? s.symbol.toUpperCase() : undefined,
+  }),
+  loaderDeps: ({ search }) => search,
+  loader: async ({ params, deps }) => {
+    const id = Number(params.scanId)
+    const [scan, trades] = await Promise.all([api.scan(id), api.trades(id, deps.setup, deps.symbol)])
+    if (!scan) throw notFound()
+    return { scan, trades }
+  },
+  staleTime: 5 * 60_000, // a saved scan never changes
+  gcTime: 10 * 60_000,
   component: ScanPage,
 })
 
 function ScanPage() {
-  const id = Number(Route.useParams().scanId)
-  const scan = useQuery(q.scan(id))
+  const { scan } = Route.useLoaderData()
   return (
     <>
-      <PageHeader title={`Scan #${id}`} description={scan.data?.created} />
-      {scan.isPending ? (
-        <Loading rows={6} />
-      ) : scan.error ? (
-        <ErrorState error={scan.error} />
-      ) : (
-        <div className="space-y-6">
-          <ScanView scan={scan.data} />
-          <Trades scanId={id} />
-        </div>
-      )}
+      <PageHeader title={`Scan #${scan.id}`} description={scan.created} />
+      <div className="space-y-6">
+        <ScanView scan={scan} />
+        <Trades />
+      </div>
     </>
   )
 }
 
-/** Every backtest trade of the validated setups at the time of this scan. */
-function Trades({ scanId }: { scanId: number }) {
-  const validated = useQuery(q.validated())
-  const setups = validated.data?.setups.map((s) => [s.setup, ...s.filters].join("+")) ?? []
-  const [setup, setSetup] = useState<string | null>(null)
-  const [symbol, setSymbol] = useState("")
-  const trades = useQuery(q.trades(scanId, setup ?? undefined, symbol.trim() || undefined))
-  const rows = trades.data ?? []
-  const avg = rows.length ? rows.reduce((a, t) => a + t.R, 0) / rows.length : null
+const root = getRouteApi("__root__")
+
+/** Every backtest trade of the validated setups at the time of this scan; filters live in the URL. */
+function Trades() {
+  const { trades } = Route.useLoaderData()
+  const { setup, symbol } = Route.useSearch()
+  const { validated } = root.useLoaderData()
+  const navigate = useNavigate({ from: Route.fullPath })
+  const [typed, setTyped] = useState(symbol ?? "")
+  const setups = validated?.setups.map((s) => [s.setup, ...s.filters].join("+")) ?? []
+  const avg = trades.length ? trades.reduce((a, t) => a + t.R, 0) / trades.length : null
+  const win = trades.length ? Math.round((100 * trades.filter((t) => t.R > 0).length) / trades.length) : 0
   return (
     <Section
       title="Backtest trades"
-      description={
-        trades.data
-          ? `${rows.length} trades · avg ${signed(avg, 3)}R after costs · ${rows.length ? Math.round((100 * rows.filter((t) => t.R > 0).length) / rows.length) : 0}% profitable`
-          : "Every historical signal of the validated setups."
-      }
+      description={`${trades.length} trades · avg ${signed(avg, 3)}R after costs · ${win}% profitable`}
       action={
         <div className="flex gap-2">
-          <Select value={setup} onValueChange={(v) => setSetup(v)}>
+          <Select value={setup ?? null} onValueChange={(v) => navigate({ search: (s) => ({ ...s, setup: v ?? undefined }), replace: true })}>
             <SelectTrigger className="w-56">
               <SelectValue placeholder="All setups" />
             </SelectTrigger>
@@ -67,15 +73,18 @@ function Trades({ scanId }: { scanId: number }) {
               ))}
             </SelectContent>
           </Select>
-          <Input className="w-32" placeholder="Symbol" value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} />
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              navigate({ search: (s) => ({ ...s, symbol: typed.trim() || undefined }), replace: true })
+            }}
+          >
+            <Input className="w-32" placeholder="Symbol ⏎" value={typed} onChange={(e) => setTyped(e.target.value.toUpperCase())} />
+          </form>
         </div>
       }
     >
-      {trades.isPending ? (
-        <Loading />
-      ) : trades.error ? (
-        <ErrorState error={trades.error} />
-      ) : !rows.length ? (
+      {!trades.length ? (
         <Empty>No trades match.</Empty>
       ) : (
         <div className="max-h-[32rem] overflow-auto">
@@ -93,7 +102,7 @@ function Trades({ scanId }: { scanId: number }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {[...rows].reverse().slice(0, 500).map((t, i) => (
+              {[...trades].reverse().slice(0, 500).map((t, i) => (
                 <TableRow key={i}>
                   <TableCell>
                     <StockLink symbol={t.symbol} sector={t.sector} />
@@ -109,7 +118,7 @@ function Trades({ scanId }: { scanId: number }) {
               ))}
             </TableBody>
           </Table>
-          {rows.length > 500 && <p className="p-2 text-xs text-muted-foreground">Showing the newest 500 of {rows.length}.</p>}
+          {trades.length > 500 && <p className="p-2 text-xs text-muted-foreground">Showing the newest 500 of {trades.length}.</p>}
         </div>
       )}
     </Section>

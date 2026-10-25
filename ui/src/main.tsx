@@ -1,6 +1,5 @@
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createRouter, RouterProvider } from "@tanstack/react-router"
 
 import "./index.css"
@@ -8,12 +7,17 @@ import { routeTree } from "./routeTree.gen"
 import { ThemeProvider } from "@/components/theme-provider.tsx"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/sonner"
+import { ErrorState, Loading } from "@/components/common"
 
-const queryClient = new QueryClient({
-  defaultOptions: { queries: { staleTime: 30_000, retry: 1, refetchOnWindowFocus: false } },
+// Data comes from route loaders; each route sets its own staleTime/gcTime. router.invalidate() reloads the page's data.
+const router = createRouter({
+  routeTree,
+  defaultPreload: "intent",
+  defaultPreloadStaleTime: 30_000,
+  defaultPendingComponent: () => <Loading rows={6} />,
+  defaultPendingMs: 300,
+  defaultErrorComponent: ({ error }) => <ErrorState error={error} />,
 })
-
-const router = createRouter({ routeTree, context: { queryClient }, defaultPreload: "intent" })
 
 declare module "@tanstack/react-router" {
   interface Register {
@@ -24,12 +28,10 @@ declare module "@tanstack/react-router" {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ThemeProvider>
-      <QueryClientProvider client={queryClient}>
-        <TooltipProvider>
-          <RouterProvider router={router} />
-          <Toaster />
-        </TooltipProvider>
-      </QueryClientProvider>
+      <TooltipProvider>
+        <RouterProvider router={router} />
+        <Toaster />
+      </TooltipProvider>
     </ThemeProvider>
   </StrictMode>
 )

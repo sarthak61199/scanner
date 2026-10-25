@@ -1,27 +1,24 @@
-import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 
-import { q } from "@/lib/api"
+import { api } from "@/lib/api"
 import { moodLabel, signed } from "@/lib/format"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Empty, ErrorState, Loading, PageHeader, Section } from "@/components/common"
+import { Empty, PageHeader, Section } from "@/components/common"
 
 export const Route = createFileRoute("/scans/")({
+  loader: () => api.scans(),
+  staleTime: 60_000,
   component: Scans,
 })
 
 function Scans() {
-  const scans = useQuery(q.scans())
+  const scans = Route.useLoaderData()
   return (
     <>
       <PageHeader title="Scans" description="Every saved scan, newest first." />
       <Section title="History">
-        {scans.isPending ? (
-          <Loading />
-        ) : scans.error ? (
-          <ErrorState error={scans.error} />
-        ) : !scans.data.length ? (
+        {!scans.length ? (
           <Empty>No scans yet.</Empty>
         ) : (
           <Table>
@@ -34,7 +31,7 @@ function Scans() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {scans.data.map((s) => (
+              {scans.map((s) => (
                 <TableRow key={s.id}>
                   <TableCell>
                     <Link to="/scans/$scanId" params={{ scanId: String(s.id) }} className="font-medium hover:underline">

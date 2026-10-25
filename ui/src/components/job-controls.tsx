@@ -1,18 +1,23 @@
-import { useEffect, useRef } from "react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
+import { useEffect, useRef, useState } from "react"
+import { getRouteApi, Link, useRouter } from "@tanstack/react-router"
 import { FlaskConicalIcon, LoaderCircleIcon, PlayIcon } from "lucide-react"
 import { toast } from "sonner"
 
-import { api, ApiError, q, type JobKind } from "@/lib/api"
+import { api, ApiError, isActive, type JobKind } from "@/lib/api"
+import { usePoll } from "@/hooks/use-poll"
 import { Button } from "@/components/ui/button"
 
-/** Run scan / research buttons; while a job runs, shows it and refreshes data when it finishes. */
+const root = getRouteApi("__root__")
+
+/** Run scan / research buttons; while a job runs, polls the root loader and reloads all data when it finishes. */
 export function JobControls() {
-  const qc = useQueryClient()
-  const jobs = useQuery(q.jobs())
-  const active = jobs.data?.find((j) => j.status === "queued" || j.status === "running")
+  const router = useRouter()
+  const { jobs } = root.useLoaderData()
+  const active = jobs.find(isActive)
+  const [starting, setStarting] = useState(false)
   const wasActive = useRef<number | null>(null)
+
+  usePoll(!!active, "__root__", 3000)
 
   useEffect(() => {
     if (active) {
@@ -22,20 +27,24 @@ export function JobControls() {
     const id = wasActive.current
     if (id == null) return
     wasActive.current = null
-    const job = jobs.data?.find((j) => j.id === id)
+    const job = jobs.find((j) => j.id === id)
     if (job?.status === "done") toast.success(`${job.kind === "scan" ? "Scan" : "Research"} #${id} finished`)
     if (job?.status === "failed") toast.error(`Job #${id} failed`, { description: job.error ?? undefined })
-    qc.invalidateQueries({ predicate: (query) => query.queryKey[0] !== "jobs" })
-  }, [active, jobs.data, qc])
+    router.invalidate()
+  }, [active, jobs, router])
 
-  const start = useMutation({
-    mutationFn: (kind: JobKind) => api.startJob(kind),
-    onSuccess: (job) => {
-      toast(`${job.kind === "scan" ? "Scan" : "Research"} started`, { description: `Job #${job.id}` })
-      qc.invalidateQueries({ queryKey: ["jobs"] })
-    },
-    onError: (e) => toast.error(e instanceof ApiError && e.status === 409 ? "A job is already running" : e.message),
-  })
+  async function start(kind: JobKind) {
+    setStarting(true)
+    try {
+      const job = await api.startJob(kind)
+      toast(`${kind === "scan" ? "Scan" : "Research"} started`, { description: `Job #${job.id}` })
+    } catch (e) {
+      toast.error(e instanceof ApiError && e.status === 409 ? "A job is already running" : String(e))
+    } finally {
+      setStarting(false)
+      router.invalidate({ filter: (m) => m.routeId === "__root__" })
+    }
+  }
 
   if (active) {
     return (
@@ -49,10 +58,10 @@ export function JobControls() {
   }
   return (
     <div className="flex gap-2">
-      <Button size="sm" disabled={start.isPending} onClick={() => start.mutate("scan")}>
+      <Button size="sm" disabled={starting} onClick={() => start("scan")}>
         <PlayIcon /> Run scan
       </Button>
-      <Button size="sm" variant="outline" disabled={start.isPending} onClick={() => start.mutate("research")}>
+      <Button size="sm" variant="outline" disabled={starting} onClick={() => start("research")}>
         <FlaskConicalIcon /> Research
       </Button>
     </div>

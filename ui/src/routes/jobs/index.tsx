@@ -1,35 +1,31 @@
-import { useQuery } from "@tanstack/react-query"
-import { createFileRoute, Link } from "@tanstack/react-router"
+import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router"
 
-import { q } from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Empty, ErrorState, Loading, PageHeader, Section } from "@/components/common"
+import { Empty, PageHeader, Section } from "@/components/common"
 import { duration, JobStatusBadge } from "@/components/job-status"
 
 export const Route = createFileRoute("/jobs/")({
   component: Jobs,
 })
 
+// the job list and schedule are root loader data (the header needs them too, and polls them while a job runs)
+const root = getRouteApi("__root__")
+
 function Jobs() {
-  const jobs = useQuery(q.jobs())
-  const schedule = useQuery(q.schedule())
+  const { jobs, schedule } = root.useLoaderData()
   return (
     <>
       <PageHeader
         title="Jobs"
         description={
-          schedule.data?.enabled
-            ? `Scans run automatically on weekdays at ${schedule.data.scan_time} IST (next ${schedule.data.next_scan}); research weekly (next ${schedule.data.next_research}). One job runs at a time, and only while the server is up.`
+          schedule.enabled
+            ? `Scans run automatically on weekdays at ${schedule.scan_time} IST (next ${schedule.next_scan}); research weekly (next ${schedule.next_research}). One job runs at a time, and only while the server is up.`
             : "Scheduler is off (SCHEDULER=false). Scans and research run only when started here. One job runs at a time."
         }
       />
       <Section title="Recent jobs">
-        {jobs.isPending ? (
-          <Loading />
-        ) : jobs.error ? (
-          <ErrorState error={jobs.error} />
-        ) : !jobs.data.length ? (
+        {!jobs.length ? (
           <Empty>No jobs yet.</Empty>
         ) : (
           <Table>
@@ -44,7 +40,7 @@ function Jobs() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {jobs.data.map((j) => (
+              {jobs.map((j) => (
                 <TableRow key={j.id}>
                   <TableCell>
                     <Link to="/jobs/$jobId" params={{ jobId: String(j.id) }} className="font-medium hover:underline">

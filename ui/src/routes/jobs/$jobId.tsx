@@ -1,54 +1,50 @@
 import { useEffect, useRef } from "react"
-import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 
-import { q } from "@/lib/api"
+import { api, isActive } from "@/lib/api"
+import { usePoll } from "@/hooks/use-poll"
 import { Button } from "@/components/ui/button"
-import { ErrorState, Loading, PageHeader, Section } from "@/components/common"
+import { ErrorState, PageHeader, Section } from "@/components/common"
 import { duration, JobStatusBadge } from "@/components/job-status"
 
 export const Route = createFileRoute("/jobs/$jobId")({
+  loader: ({ params }) => api.job(Number(params.jobId)),
+  staleTime: 0, // polled while the job runs
   component: JobPage,
 })
 
 function JobPage() {
-  const id = Number(Route.useParams().jobId)
-  const job = useQuery(q.job(id))
+  const job = Route.useLoaderData()
   const logRef = useRef<HTMLPreElement>(null)
-  const log = job.data?.log ?? ""
+
+  usePoll(isActive(job), Route.id)
 
   // keep the newest output in view while the job runs
   useEffect(() => {
     const el = logRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [log])
+  }, [job.log])
 
   return (
     <>
       <PageHeader
-        title={`Job #${id}`}
-        description={job.data && `${job.data.kind} · created ${job.data.created} · ${duration(job.data)}`}
+        title={`Job #${job.id}`}
+        description={`${job.kind} · created ${job.created} · ${duration(job)}`}
         actions={
-          job.data?.status === "done" &&
-          (job.data.kind === "scan" ? (
+          job.status === "done" &&
+          (job.kind === "scan" ? (
             <Button render={<Link to="/" />}>View scan</Button>
           ) : (
             <Button render={<Link to="/research" />}>View research</Button>
           ))
         }
       />
-      {job.isPending ? (
-        <Loading />
-      ) : job.error ? (
-        <ErrorState error={job.error} />
-      ) : (
-        <Section title="Output" action={<JobStatusBadge status={job.data.status} />}>
-          {job.data.error && <ErrorState error={job.data.error} />}
-          <pre ref={logRef} className="mt-3 max-h-[60vh] overflow-auto rounded-lg bg-muted p-4 font-mono text-xs leading-relaxed">
-            {log || "Waiting for output…"}
-          </pre>
-        </Section>
-      )}
+      <Section title="Output" action={<JobStatusBadge status={job.status} />}>
+        {job.error && <ErrorState error={job.error} />}
+        <pre ref={logRef} className="mt-3 max-h-[60vh] overflow-auto rounded-lg bg-muted p-4 font-mono text-xs leading-relaxed">
+          {job.log || "Waiting for output…"}
+        </pre>
+      </Section>
     </>
   )
 }

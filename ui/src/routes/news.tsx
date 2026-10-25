@@ -1,9 +1,8 @@
-import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 
-import { q } from "@/lib/api"
+import { api } from "@/lib/api"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Empty, ErrorState, Loading, PageHeader, Section } from "@/components/common"
+import { Empty, PageHeader, Section } from "@/components/common"
 import { HeadlineRow, MoodCard } from "@/components/mood"
 
 const CATEGORIES = ["geopolitics", "rbi_rates", "govt_policy", "macro_data", "global_markets", "commodities", "fii_flows", "sector", "company", "other"]
@@ -16,14 +15,19 @@ export const Route = createFileRoute("/news")({
     days: DAYS.includes(Number(s.days)) ? Number(s.days) : 3,
     category: CATEGORIES.includes(String(s.category)) ? String(s.category) : undefined,
   }),
+  loaderDeps: ({ search }) => search,
+  loader: async ({ deps }) => {
+    const [mood, news] = await Promise.all([api.mood(deps.days), api.news(deps.days, deps.category)])
+    return { mood, news }
+  },
+  staleTime: 5 * 60_000,
   component: News,
 })
 
 function News() {
   const { days, category } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
-  const mood = useQuery(q.mood(days))
-  const news = useQuery(q.news(days, category))
+  const { mood, news } = Route.useLoaderData()
   return (
     <>
       <PageHeader
@@ -63,17 +67,13 @@ function News() {
         }
       />
       <div className="space-y-6">
-        {mood.isPending ? <Loading /> : mood.error ? <ErrorState error={mood.error} /> : <MoodCard mood={mood.data} />}
-        <Section title="Headlines" description={news.data ? `${news.data.length} headlines` : undefined}>
-          {news.isPending ? (
-            <Loading />
-          ) : news.error ? (
-            <ErrorState error={news.error} />
-          ) : !news.data.length ? (
+        <MoodCard mood={mood} />
+        <Section title="Headlines" description={`${news.length} headlines`}>
+          {!news.length ? (
             <Empty>No headlines for this period.</Empty>
           ) : (
             <ul className="divide-y">
-              {news.data.map((h) => (
+              {news.map((h) => (
                 <HeadlineRow key={h.link ?? h.title} h={h} />
               ))}
             </ul>

@@ -1,14 +1,18 @@
-import type { QueryClient } from "@tanstack/react-query"
-import { createRootRouteWithContext, Link, Outlet } from "@tanstack/react-router"
-import { useQuery } from "@tanstack/react-query"
+import { createRootRoute, Link, Outlet } from "@tanstack/react-router"
 import { ActivityIcon, ClockIcon, MoonIcon, SunIcon } from "lucide-react"
 
+import { api } from "@/lib/api"
 import { JobControls } from "@/components/job-controls"
 import { useTheme } from "@/components/theme-provider"
 import { Button } from "@/components/ui/button"
-import { q } from "@/lib/api"
 
-export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
+// App-wide data used by the header and several pages; components deep in the tree read it with getRouteApi("__root__").
+export const Route = createRootRoute({
+  loader: async () => {
+    const [config, schedule, jobs, validated] = await Promise.all([api.config(), api.schedule(), api.jobs(), api.validated()])
+    return { config, schedule, jobs, validated }
+  },
+  staleTime: 30_000,
   component: RootLayout,
   notFoundComponent: () => <p className="text-muted-foreground">Page not found.</p>,
 })
@@ -23,8 +27,8 @@ const NAV = [
 ] as const
 
 function RootLayout() {
+  const { schedule } = Route.useLoaderData()
   const { theme, setTheme } = useTheme()
-  const schedule = useQuery(q.schedule())
   const dark = theme === "dark" || (theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches)
   return (
     <div className="min-h-svh">
@@ -46,9 +50,9 @@ function RootLayout() {
               </Link>
             ))}
           </nav>
-          {schedule.data?.enabled && (
+          {schedule.enabled && (
             <Link to="/jobs" className="hidden items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground md:flex">
-              <ClockIcon className="size-3.5" /> next scan {schedule.data.next_scan.slice(5, 16)}
+              <ClockIcon className="size-3.5" /> next scan {schedule.next_scan.slice(5, 16)}
             </Link>
           )}
           <JobControls />

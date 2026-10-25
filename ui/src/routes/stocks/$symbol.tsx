@@ -1,52 +1,57 @@
-import { useQuery } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { Await, createFileRoute } from "@tanstack/react-router"
 import { TriangleAlertIcon } from "lucide-react"
 
-import { q, type Delivery } from "@/lib/api"
+import { api, type Deal, type Delivery, type Fundamentals } from "@/lib/api"
 import { num } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { Empty, ErrorState, Loading, PageHeader, Section } from "@/components/common"
+import { Empty, Loading, PageHeader, Section } from "@/components/common"
 
 export const Route = createFileRoute("/stocks/$symbol")({
   validateSearch: (s: Record<string, unknown>): { sector?: string } => ({
     sector: typeof s.sector === "string" && s.sector ? s.sector : undefined,
   }),
+  loaderDeps: ({ search }) => ({ sector: search.sector }),
+  loader: async ({ params, deps }) => {
+    // fundamentals can take seconds (first NSE fetch of the day): stream it in instead of blocking the page
+    const fundamentals = api.fundamentals(params.symbol, deps.sector)
+    const [delivery, deals] = await Promise.all([api.delivery(params.symbol, 90), api.deals(params.symbol, 90)])
+    return { fundamentals, delivery, deals }
+  },
+  staleTime: 10 * 60_000,
   component: Stock,
 })
 
 function Stock() {
   const { symbol } = Route.useParams()
   const { sector } = Route.useSearch()
+  const { fundamentals, delivery, deals } = Route.useLoaderData()
   return (
     <>
       <PageHeader title={symbol} description={sector ?? "NSE"} />
       <div className="space-y-6">
-        <FundamentalsSection symbol={symbol} sector={sector} />
+        <Section title="Fundamentals" description="From NSE XBRL filings, cached daily. First load of the day can take a few seconds.">
+          <Await promise={fundamentals} fallback={<Loading />}>
+            {(f) => <FundamentalsBody f={f} />}
+          </Await>
+        </Section>
         <div className="grid gap-6 lg:grid-cols-2">
-          <DeliverySection symbol={symbol} />
-          <DealsSection symbol={symbol} />
+          <DeliverySection rows={delivery} />
+          <DealsSection deals={deals} />
         </div>
       </div>
     </>
   )
 }
 
-function FundamentalsSection({ symbol, sector }: { symbol: string; sector?: string }) {
-  const f = useQuery(q.fundamentals(symbol, sector))
+function FundamentalsBody({ f }: { f: Fundamentals }) {
   return (
-    <Section title="Fundamentals" description="From NSE XBRL filings, cached daily. First load of the day can take a few seconds.">
-      {f.isPending ? (
-        <Loading />
-      ) : f.error ? (
-        <ErrorState error={f.error} />
-      ) : (
         <div className="space-y-4">
-          {f.data.red_flags?.length ? (
+          {f.red_flags?.length ? (
             <div className="flex flex-wrap gap-2">
-              {f.data.red_flags.map((r) => (
+              {f.red_flags.map((r) => (
                 <Badge key={r} variant="destructive">
                   <TriangleAlertIcon /> {r}
                 </Badge>
@@ -57,11 +62,11 @@ function FundamentalsSection({ symbol, sector }: { symbol: string; sector?: stri
               No red flags
             </Badge>
           )}
-          {f.data.quarters.length ? (
+          {f.quarters.length ? (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Quarter ({f.data.quarters[0].type.toLowerCase()})</TableHead>
+                  <TableHead>Quarter ({f.quarters[0].type.toLowerCase()})</TableHead>
                   <TableHead className="text-right">Revenue (₹ cr)</TableHead>
                   <TableHead className="text-right">Net profit (₹ cr)</TableHead>
                   <TableHead className="text-right">EPS</TableHead>
@@ -69,7 +74,7 @@ function FundamentalsSection({ symbol, sector }: { symbol: string; sector?: stri
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {f.data.quarters.map((x) => (
+                {f.quarters.map((x) => (
                   <TableRow key={x.quarter}>
                     <TableCell>{x.quarter}</TableCell>
                     <TableCell className="text-right tabular-nums">{num(x.revenue_cr, 0)}</TableCell>
@@ -86,22 +91,20 @@ function FundamentalsSection({ symbol, sector }: { symbol: string; sector?: stri
             <Empty>No quarterly results available.</Empty>
           )}
           <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
-            {f.data.promoter.length > 0 && (
+            {f.promoter.length > 0 && (
               <span>
                 <span className="text-muted-foreground">Promoter holding: </span>
-                {f.data.promoter.map(([d, p]) => `${d} ${p}%`).join(" · ")}
+                {f.promoter.map(([d, p]) => `${d} ${p}%`).join(" · ")}
               </span>
             )}
-            {f.data.pledge_pct != null && (
+            {f.pledge_pct != null && (
               <span>
                 <span className="text-muted-foreground">Pledged: </span>
-                {f.data.pledge_pct}%
+                {f.pledge_pct}%
               </span>
             )}
           </div>
         </div>
-      )}
-    </Section>
   )
 }
 
@@ -142,24 +145,18 @@ function DeliveryBars({ rows }: { rows: Delivery[] }) {
   )
 }
 
-function DeliverySection({ symbol }: { symbol: string }) {
-  const d = useQuery(q.delivery(symbol, 90))
+function DeliverySection({ rows }: { rows: Delivery[] }) {
   return (
     <Section title="Delivery %" description="Share of traded volume actually delivered, last 90 days. Darker bars are above the median.">
-      {d.isPending ? <Loading /> : d.error ? <ErrorState error={d.error} /> : d.data.length ? <DeliveryBars rows={d.data} /> : <Empty>No delivery data.</Empty>}
+      {rows.length ? <DeliveryBars rows={rows} /> : <Empty>No delivery data.</Empty>}
     </Section>
   )
 }
 
-function DealsSection({ symbol }: { symbol: string }) {
-  const d = useQuery(q.deals(symbol, 90))
+function DealsSection({ deals }: { deals: Deal[] }) {
   return (
     <Section title="Bulk & block deals" description="Last 90 days.">
-      {d.isPending ? (
-        <Loading />
-      ) : d.error ? (
-        <ErrorState error={d.error} />
-      ) : !d.data.length ? (
+      {!deals.length ? (
         <Empty>No bulk or block deals.</Empty>
       ) : (
         <div className="max-h-72 overflow-auto">
@@ -173,7 +170,7 @@ function DealsSection({ symbol }: { symbol: string }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {d.data.map((x, i) => (
+              {deals.map((x, i) => (
                 <TableRow key={i}>
                   <TableCell className="tabular-nums">{x.date}</TableCell>
                   <TableCell className="max-w-56 truncate">{x.client}</TableCell>

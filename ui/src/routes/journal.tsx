@@ -1,8 +1,7 @@
 import { useState } from "react"
-import { useQuery } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 
-import { q, type JournalGroup, type JournalStats, type PaperTrade } from "@/lib/api"
+import { api, type JournalGroup, type JournalStats, type PaperTrade } from "@/lib/api"
 import { pct, rClass, rupees, signed } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
@@ -10,12 +9,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { Empty, ErrorState, Loading, PageHeader, Section } from "@/components/common"
+import { Empty, PageHeader, Section } from "@/components/common"
 import { StockLink } from "@/components/scan-view"
 
 export const Route = createFileRoute("/journal")({
+  loader: async () => {
+    const [stats, trades] = await Promise.all([api.journalStats(), api.journal()])
+    return { stats, trades }
+  },
+  staleTime: 60_000,
   component: Journal,
 })
+
+const root = getRouteApi("__root__")
 
 const ENOUGH = 30 // closed trades before live results say much
 
@@ -186,59 +192,42 @@ function Trades({ trades }: { trades: PaperTrade[] }) {
 }
 
 function Journal() {
-  const stats = useQuery(q.journalStats())
-  const trades = useQuery(q.journal())
-  const config = useQuery(q.config())
+  const { stats: s, trades } = Route.useLoaderData()
+  const { config } = root.useLoaderData()
   return (
     <>
       <PageHeader
         title="Journal"
-        description={`Every trade plan, paper-traded with the backtest's exit rules: the honest forward test. "Taken" = the ${config.data?.max_open ?? 5}-slot account.`}
+        description={`Every trade plan, paper-traded with the backtest's exit rules: the honest forward test. "Taken" = the ${config.max_open}-slot account.`}
       />
-      <JournalBody stats={stats} trades={trades} />
+      {!trades.length ? (
+        <div className="space-y-6">
+          <Empty>
+            No paper trades yet. Each scan records its trade plans here and updates open ones, so results build up as the daily
+            scan runs.
+          </Empty>
+          <SetupCards stats={s} />
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <SetupCards stats={s} />
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Section title="By Claude conviction" description="Do HIGH-conviction picks actually do better? (accepted trades)">
+              <GroupTable rows={(["HIGH", "MEDIUM", "LOW", "none"] as const).map((k) => [k === "none" ? "no note" : k, s.by_conviction[k]])} />
+            </Section>
+            <Section title="Fundamentals filter" description="Rejected plans are paper-traded too, to test whether the red flags help.">
+              <GroupTable
+                rows={[
+                  ["Accepted", s.overall.accepted],
+                  ["Rejected on red flags", s.overall.rejected],
+                  ["Taken (5-slot)", s.overall.taken],
+                ]}
+              />
+            </Section>
+          </div>
+          <Trades trades={trades} />
+        </div>
+      )}
     </>
-  )
-}
-
-function JournalBody({
-  stats,
-  trades,
-}: {
-  stats: ReturnType<typeof useQuery<JournalStats>>
-  trades: ReturnType<typeof useQuery<PaperTrade[]>>
-}) {
-  if (stats.error || trades.error) return <ErrorState error={stats.error ?? trades.error} />
-  if (!stats.data || !trades.data) return <Loading rows={6} />
-  const s = stats.data
-  if (!trades.data.length) {
-    return (
-      <div className="space-y-6">
-        <Empty>
-          No paper trades yet. Each scan records its trade plans here and updates open ones, so results build up as the daily
-          scan runs.
-        </Empty>
-        <SetupCards stats={s} />
-      </div>
-    )
-  }
-  return (
-    <div className="space-y-6">
-      <SetupCards stats={s} />
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Section title="By Claude conviction" description="Do HIGH-conviction picks actually do better? (accepted trades)">
-          <GroupTable rows={(["HIGH", "MEDIUM", "LOW", "none"] as const).map((k) => [k === "none" ? "no note" : k, s.by_conviction[k]])} />
-        </Section>
-        <Section title="Fundamentals filter" description="Rejected plans are paper-traded too, to test whether the red flags help.">
-          <GroupTable
-            rows={[
-              ["Accepted", s.overall.accepted],
-              ["Rejected on red flags", s.overall.rejected],
-              ["Taken (5-slot)", s.overall.taken],
-            ]}
-          />
-        </Section>
-      </div>
-      <Trades trades={trades.data} />
-    </div>
   )
 }
