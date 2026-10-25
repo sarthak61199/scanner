@@ -4,7 +4,8 @@ MVP: Indian stock discovery + timing scanner.
   pip install yfinance pandas requests anthropic python-dotenv pypdf fonttools fastapi uvicorn
   python scan.py                 # scan, print report, write report.md, save to trading.db
   RESEARCH=true in .env          # instead: test all setups, save a research run + research.md
-  uvicorn api:app                # REST API; runs the same scan/research as background jobs
+  cd ui && npm install && npm run build   # once, and after UI changes
+  uvicorn api:app                # UI at http://localhost:8000, REST API under /api (scan/research as jobs)
   Settings: edit config.py. Files: config, data, nse, backtest, research, llm, report.
 
 Pipeline: universe -> sector strength -> stock ranking -> setup detection

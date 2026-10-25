@@ -1,9 +1,11 @@
-"""REST API for the React UI (no auth). Run: uvicorn api:app --reload   Docs: http://localhost:8000/docs"""
+"""REST API under /api plus the built React UI (ui/dist) on the same origin, no auth.
+Run: uvicorn api:app --reload   UI: http://localhost:8000   Docs: http://localhost:8000/docs"""
+import os
 from contextlib import asynccontextmanager
 from typing import Literal
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import APIRouter, FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import config
 import jobs
@@ -21,8 +23,8 @@ async def lifespan(app):
 
 
 app = FastAPI(title="NSE swing-trade scanner", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-                   allow_methods=["*"], allow_headers=["*"])
+api = APIRouter(prefix="/api")
+UI_DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui", "dist")
 
 
 SCAN_JSON = ("sectors", "plans", "watchlist", "rejected", "funds", "mood", "notes")
@@ -39,7 +41,7 @@ def _since(days):
     return f"{pd.Timestamp.now() - pd.Timedelta(days=days):%Y-%m-%d}"
 
 
-@app.get("/health")
+@api.get("/health")
 def health():
     counts = {t: rows(f"SELECT COUNT(*) AS n FROM {t}")[0]["n"]
               for t in ("delivery", "deals", "results_dates", "news", "scans", "research_runs", "jobs")}
@@ -47,7 +49,7 @@ def health():
     return {"ok": True, "rows": counts, "last_scan": last[0]["created"] if last else None, "active_job": jobs.active()}
 
 
-@app.get("/config")
+@api.get("/config")
 def get_config():
     keys = ("CAPITAL", "RISK_PCT", "MAX_OPEN", "MIN_TURNOVER_CR", "TOP", "HISTORY_YEARS", "TEST_MONTHS", "COST_PCT",
             "SETUPS", "FILTERS", "EXITS", "STOP_WIDTHS", "MACRO", "MOOD_DAYS")
@@ -66,7 +68,7 @@ def _job(job_id, tail=None):
     return j
 
 
-@app.post("/jobs", status_code=202)
+@api.post("/jobs", status_code=202)
 def create_job(body: JobIn):
     job_id = jobs.submit(body.kind)
     if job_id is None:
@@ -74,12 +76,12 @@ def create_job(body: JobIn):
     return _job(job_id)
 
 
-@app.get("/jobs")
+@api.get("/jobs")
 def list_jobs(limit: int = 20):
     return rows("SELECT id, kind, status, created, started, finished, error FROM jobs ORDER BY id DESC LIMIT ?", (limit,))
 
 
-@app.get("/jobs/{job_id}")
+@api.get("/jobs/{job_id}")
 def get_job(job_id: int, tail: int | None = Query(None, ge=1)):
     return _job(job_id, tail)
 
@@ -95,7 +97,7 @@ def _scan(where, params=()):
     return s
 
 
-@app.get("/scans")
+@api.get("/scans")
 def list_scans(limit: int = 20):
     out = []
     for s in rows("SELECT id, job_id, created, plans, mood FROM scans ORDER BY id DESC LIMIT ?", (limit,)):
@@ -105,17 +107,17 @@ def list_scans(limit: int = 20):
     return out
 
 
-@app.get("/scans/latest")
+@api.get("/scans/latest")
 def latest_scan():
     return _scan("ORDER BY id DESC LIMIT 1")
 
 
-@app.get("/scans/{scan_id}")
+@api.get("/scans/{scan_id}")
 def get_scan(scan_id: int):
     return _scan("WHERE id = ?", (scan_id,))
 
 
-@app.get("/scans/{scan_id}/trades")
+@api.get("/scans/{scan_id}/trades")
 def scan_trades(scan_id: int, setup: str | None = None, symbol: str | None = None):
     sql, params = "SELECT * FROM backtest_trades WHERE scan_id = ?", [scan_id]
     if setup:
@@ -126,7 +128,7 @@ def scan_trades(scan_id: int, setup: str | None = None, symbol: str | None = Non
 
 
 # ---------- research ----------
-@app.get("/setups/validated")
+@api.get("/setups/validated")
 def validated_setups():
     v = latest_validated()
     if v is None:
@@ -134,7 +136,7 @@ def validated_setups():
     return {**v, "age_days": (pd.Timestamp.today() - pd.Timestamp(v["generated"])).days}
 
 
-@app.get("/research")
+@api.get("/research")
 def list_research(limit: int = 20):
     return [{**r, "validated": loads(r["validated"])}
             for r in rows("SELECT id, job_id, created, test_start, validated FROM research_runs ORDER BY id DESC LIMIT ?", (limit,))]
@@ -145,41 +147,58 @@ def _research(where, params=()):
     return {**r, "rows": loads(r["rows"]), "validated": loads(r["validated"])}
 
 
-@app.get("/research/latest")
+@api.get("/research/latest")
 def latest_research():
     return _research("ORDER BY id DESC LIMIT 1")
 
 
-@app.get("/research/{run_id}")
+@api.get("/research/{run_id}")
 def get_research(run_id: int):
     return _research("WHERE id = ?", (run_id,))
 
 
 # ---------- news ----------
-@app.get("/news")
+@api.get("/news")
 def news(days: int = Query(config.MOOD_DAYS, ge=1, le=60), category: str | None = None):
     return list_news(days, category)
 
 
-@app.get("/news/mood")
+@api.get("/news/mood")
 def news_mood(days: int = Query(config.MOOD_DAYS, ge=1, le=60)):
     return clean(market_mood(days))
 
 
 # ---------- stocks ----------
-@app.get("/stocks/{symbol}/fundamentals")
+@api.get("/stocks/{symbol}/fundamentals")
 def stock_fundamentals(symbol: str, sector: str = ""):
     """Fetched from NSE on first request each day (slow), then cached. `sector` only affects the debt/equity flag."""
     f = fundamentals(symbol.upper())
     return {**f, "red_flags": red_flags(f, sector)}
 
 
-@app.get("/stocks/{symbol}/delivery")
+@api.get("/stocks/{symbol}/delivery")
 def stock_delivery(symbol: str, days: int = Query(60, ge=1, le=2000)):
     return rows("SELECT date, deliv_per FROM delivery WHERE symbol = ? AND date >= ? ORDER BY date",
                 (symbol.upper(), _since(days)))
 
 
-@app.get("/stocks/{symbol}/deals")
+@api.get("/stocks/{symbol}/deals")
 def stock_deals(symbol: str, days: int = Query(30, ge=1, le=2000)):
     return rows("SELECT * FROM deals WHERE symbol = ? AND date >= ? ORDER BY date DESC", (symbol.upper(), _since(days)))
+
+
+app.include_router(api)
+
+
+@app.get("/{path:path}", include_in_schema=False)
+def ui(path: str):
+    """Built UI files; any other path gets index.html so client-side routes work on reload."""
+    if path.startswith("api/"):
+        raise HTTPException(404, "not found")
+    f = os.path.realpath(os.path.join(UI_DIST, path))
+    if path and f.startswith(os.path.realpath(UI_DIST) + os.sep) and os.path.isfile(f):
+        return FileResponse(f)
+    index = os.path.join(UI_DIST, "index.html")
+    if not os.path.isfile(index):
+        raise HTTPException(404, "UI not built: run `npm run build` in ui/")
+    return FileResponse(index)
