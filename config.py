@@ -112,6 +112,9 @@ NEWS_FEEDS = ["markets", "companies", "industry", "news", "politics"]
 MOOD_DAYS = 3       # days of headlines in the market-mood summary
 
 
+TAG_DAYS = 7        # days of untagged headlines each scan tags (covers weekends, holidays, post-scan Friday news)
+
+
 # ---------- daily scheduler (runs inside the API server; SCHEDULER=false in .env turns it off) ----------
 SCHEDULE = {"scan_time": "16:30",      # IST, weekdays: after NSE publishes the bhavcopy and deals
             "research_day": 5,         # Saturday (Monday = 0)

@@ -16,7 +16,7 @@ Not investment advice. Research tool.
 import os
 import re
 import pandas as pd
-from config import CAPITAL, MAX_OPEN, MIN_TURNOVER_CR, RISK_PCT, TEST_MONTHS, TOP
+from config import CAPITAL, MAX_OPEN, MIN_TURNOVER_CR, RISK_PCT, TAG_DAYS, TEST_MONTHS, TOP
 from data import add_filters, download, enrich, load_macro, load_nifty, load_universe
 from nse import add_nse_signals, fundamentals, red_flags
 from backtest import backtest
@@ -126,7 +126,7 @@ def scan_job(job_id=None):
     fetch_news()
     if use_claude and os.getenv("ANTHROPIC_API_KEY"):
         try:
-            tag_news(set(uni.values()))
+            tag_news(set(uni.values()), days=TAG_DAYS)
             mood = market_mood()
             print(f"\n=== MARKET MOOD (news, context only) ===\n{mood_text(mood)}")
         except Exception as e:
