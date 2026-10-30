@@ -12,7 +12,7 @@ import { ErrorState, Loading } from "@/components/common"
 // Data comes from route loaders; each route sets its own staleTime/gcTime. router.invalidate() reloads the page's data.
 const router = createRouter({
   routeTree,
-  defaultPreload: "intent",
+  defaultPreload: false,
   defaultPreloadStaleTime: 30_000,
   defaultPendingComponent: () => <Loading rows={6} />,
   defaultPendingMs: 300,
