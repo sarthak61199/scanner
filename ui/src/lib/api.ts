@@ -244,6 +244,7 @@ export type PaperTrade = {
   gross_R: number
   R: number
   updated: string
+  backtest_slot_r: number | null
 }
 
 export type JournalGroup = {
@@ -251,11 +252,24 @@ export type JournalGroup = {
   closed: number
   open: number
   avg_r: number | null
+  low: number | null
+  high: number | null
   win: number | null
   total_r: number
 }
 
+export type GoLive = {
+  ready: boolean
+  start: string
+  checks: { key: string; label: string; value: number | null; target: string; ok: boolean }[]
+  avg_r: number | null
+  low: number | null
+  high: number | null
+  expected_r: number | null
+}
+
 export type JournalStats = {
+  go_live: GoLive
   overall: { accepted: JournalGroup; taken: JournalGroup; rejected: JournalGroup }
   by_setup: {
     variant: string

@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS paper_trades (
     id INTEGER PRIMARY KEY, scan_id INTEGER, symbol TEXT, sector TEXT, variant TEXT, setup TEXT, filters TEXT,
     exit_rule TEXT, stop_atr REAL, signal_date TEXT, entry REAL, initial_stop REAL, qty INTEGER, score REAL,
     conviction TEXT, note TEXT, rejected TEXT, taken INTEGER, status TEXT, current_stop REAL, last_close REAL,
-    exit_date TEXT, exit REAL, reason TEXT, days INTEGER, gross_R REAL, R REAL, updated TEXT,
+    exit_date TEXT, exit REAL, reason TEXT, days INTEGER, gross_R REAL, R REAL, updated TEXT, backtest_slot_r REAL,
     UNIQUE (symbol, variant, signal_date));
 CREATE TABLE IF NOT EXISTS research_runs (id INTEGER PRIMARY KEY, job_id INTEGER, created TEXT, test_start TEXT,
                                           rows TEXT, validated TEXT);
@@ -50,11 +50,26 @@ def connect():
         c.close()
 
 
+def _backfill_slot_r(c):
+    """Give existing paper trades the 5-slot test avgR of the newest research run on or before their signal date."""
+    runs = [(r["created"][:10], json.loads(r["validated"]))
+            for r in c.execute("SELECT created, validated FROM research_runs ORDER BY id")]
+    for t in c.execute("SELECT id, variant, signal_date FROM paper_trades").fetchall():
+        past = [v for day, v in runs if day <= t["signal_date"]]
+        if past:
+            s = next((s for s in past[-1]["setups"] if "+".join([s["setup"], *s["filters"]]) == t["variant"]), None)
+            if s:
+                c.execute("UPDATE paper_trades SET backtest_slot_r = ? WHERE id = ?", (s["test"]["taken_avg_r"], t["id"]))
+
+
 def init_db():
     with connect() as c:
         c.executescript(SCHEMA)
         if "trigger" not in {r["name"] for r in c.execute("PRAGMA table_info(jobs)")}:  # added after the first release
             c.execute("ALTER TABLE jobs ADD COLUMN trigger TEXT DEFAULT 'manual'")
+        if "backtest_slot_r" not in {r["name"] for r in c.execute("PRAGMA table_info(paper_trades)")}:  # added later too
+            c.execute("ALTER TABLE paper_trades ADD COLUMN backtest_slot_r REAL")
+            _backfill_slot_r(c)
 
 
 def clean(x):

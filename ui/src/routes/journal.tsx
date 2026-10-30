@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 
-import { api, type JournalGroup, type JournalStats, type PaperTrade } from "@/lib/api"
+import { api, type GoLive, type JournalGroup, type JournalStats, type PaperTrade } from "@/lib/api"
 import { pct, rClass, rupees, signed } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
@@ -24,6 +24,42 @@ export const Route = createFileRoute("/journal")({
 const root = getRouteApi("__root__")
 
 const ENOUGH = 30 // closed trades before live results say much
+
+function GoLiveChecklist({ g }: { g: GoLive }) {
+  return (
+    <Section
+      title="Go-live checklist"
+      description={`Accepted 5-slot paper trades closed since ${g.start}. A checklist, not proof: paper entries assume the closing price.`}
+      action={<Badge variant={g.ready ? "default" : "outline"}>{g.ready ? "Ready" : "Not ready yet"}</Badge>}
+    >
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead />
+            <TableHead className="text-right">Now</TableHead>
+            <TableHead className="text-right">Needed</TableHead>
+            <TableHead className="text-right">Status</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {g.checks.map((c) => (
+            <TableRow key={c.key}>
+              <TableCell>{c.label}</TableCell>
+              <TableCell className="text-right tabular-nums">{c.value ?? "–"}</TableCell>
+              <TableCell className="text-right tabular-nums">{c.target}</TableCell>
+              <TableCell className={cn("text-right", c.ok ? "text-positive" : "text-muted-foreground")}>{c.ok ? "Met" : "Not yet"}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      {g.low != null && (
+        <p className="mt-3 text-xs text-muted-foreground">
+          Average R is likely between {signed(g.low, 2)} and {signed(g.high, 2)} (95% range).
+        </p>
+      )}
+    </Section>
+  )
+}
 
 function SetupCards({ stats }: { stats: JournalStats }) {
   const setups = stats.by_setup.filter((s) => s.validated || s.all.n)
@@ -53,6 +89,11 @@ function SetupCards({ stats }: { stats: JournalStats }) {
                   <div className="text-xs text-muted-foreground">
                     {pct(s.all.win, 0)} win · total {signed(s.all.total_r, 1)}R
                   </div>
+                  {s.all.low != null && (
+                    <div className="text-xs text-muted-foreground">
+                      likely {signed(s.all.low, 2)} to {signed(s.all.high, 2)}
+                    </div>
+                  )}
                 </div>
                 <div>
                   <div className="text-xs text-muted-foreground">Backtest test avg R</div>
@@ -206,10 +247,12 @@ function Journal() {
             No paper trades yet. Each scan records its trade plans here and updates open ones, so results build up as the daily
             scan runs.
           </Empty>
+          <GoLiveChecklist g={s.go_live} />
           <SetupCards stats={s} />
         </div>
       ) : (
         <div className="space-y-6">
+          <GoLiveChecklist g={s.go_live} />
           <SetupCards stats={s} />
           <div className="grid gap-6 lg:grid-cols-2">
             <Section title="By Claude conviction" description="Do HIGH-conviction picks actually do better? (accepted trades)">

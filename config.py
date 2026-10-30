@@ -89,6 +89,15 @@ MAX_TEST_DD_R = 15                      # pass rule 4, on a portfolio holding at
 MAX_OPEN = 5                            # open positions at once (1% risk each)
 
 
+# ---------- go-live checklist: paper results needed before risking real money (set before results came in) ----------
+GO_LIVE = {"start": "2026-10-30",      # the current R calculation was deployed; earlier closes don't count
+           "min_closed": 50,           # closed trades
+           "min_months": 6,
+           "min_avg_r": 0,             # after costs; must be above this
+           "min_backtest_ratio": 0.5,  # paper avg R at least this share of the backtest's
+           "max_dd_r": 15}             # max drawdown, R
+
+
 # ---------- fundamentals (NSE integrated filings + shareholding) ----------
 MAX_PLEDGE = 20      # % of promoter shares pledged
 

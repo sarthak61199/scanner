@@ -2,8 +2,8 @@
 so live results can be compared with the backtest. Updated by every scan."""
 import json
 import pandas as pd
-from config import MAX_OPEN
-from backtest import simulate_trade
+from config import GO_LIVE, MAX_OPEN
+from backtest import risk_stats, simulate_trade
 from db import connect, rows
 from research import latest_validated
 
@@ -75,23 +75,57 @@ def open_trades(scan_id, all_plans, plans, rejected, frames, validated):
             cur = c.execute(
                 "INSERT OR IGNORE INTO paper_trades (scan_id, symbol, sector, variant, setup, filters, exit_rule, stop_atr, "
                 "signal_date, entry, initial_stop, qty, score, conviction, note, rejected, taken, status, current_stop, "
-                "last_close, days, gross_R, R, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, 0, 0, 0, ?)",
+                "last_close, days, gross_R, R, updated, backtest_slot_r) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, 0, 0, 0, ?, ?)",
                 (scan_id, sym, p["sector"], key, v["setup"], json.dumps(v["filters"]), v["exit"], v["stop_atr"],
                  f"{day:%Y-%m-%d}", p["entry"], p["stop"], int(p["qty"]), p["score"],
                  conv, note, rej, taken,
-                 p["stop"], p["entry"], _now()))
+                 p["stop"], p["entry"], _now(), v["test"]["taken_avg_r"]))
             if cur.rowcount:
                 added += 1
                 slots -= taken
     print(f"  journal: {added} new paper trades")
 
 
+def _range(r):
+    """95% range for an average R (mean +- 1.96 standard errors); None below 2 trades."""
+    if len(r) < 2:
+        return None, None
+    margin = 1.96 * r.std() / len(r) ** 0.5
+    return round(float(r.mean() - margin), 3), round(float(r.mean() + margin), 3)
+
+
+def _go_live(t):
+    """The GO_LIVE checklist over trades the account really took: accepted, taken, closed since GO_LIVE['start']."""
+    g = GO_LIVE
+    c = t[t["rejected"].isna() & (t["taken"] == 1) & (t["status"] == "closed")]
+    c = c[c["exit_date"] >= g["start"]]
+    avg = round(float(c["R"].mean()), 3) if len(c) else None
+    low, high = _range(c["R"])
+    exp = c["backtest_slot_r"].dropna().astype(float) if len(c) else c["R"]
+    expected = round(float(exp.mean()), 3) if len(exp) else None
+    dd = risk_stats(c.assign(date=c["exit_date"]))[0]
+    months = round(max((pd.Timestamp.now() - pd.Timestamp(g["start"])).days, 0) / 30.44, 1)
+    need = None if expected is None else round(g["min_backtest_ratio"] * expected, 3)
+    checks = [
+        {"key": "closed", "label": "Closed trades", "value": len(c), "target": f">= {g['min_closed']}", "ok": len(c) >= g["min_closed"]},
+        {"key": "months", "label": "Months running", "value": months, "target": f">= {g['min_months']}", "ok": months >= g["min_months"]},
+        {"key": "avg_r", "label": "Average R", "value": avg, "target": f"> {g['min_avg_r']}", "ok": avg is not None and avg > g["min_avg_r"]},
+        {"key": "backtest", "label": "Average R vs backtest", "value": avg,
+         "target": "no backtest figure" if need is None else f">= {need} ({g['min_backtest_ratio']:.0%} of {expected})",
+         "ok": avg is not None and need is not None and avg >= need},
+        {"key": "drawdown", "label": "Max drawdown (R)", "value": dd, "target": f"<= {g['max_dd_r']}", "ok": dd is not None and dd <= g["max_dd_r"]},
+    ]
+    return {"ready": all(x["ok"] for x in checks), "start": g["start"], "checks": checks,
+            "avg_r": avg, "low": low, "high": high, "expected_r": expected}
+
+
 def _group(t):
     if not len(t):
-        return {"n": 0, "closed": 0, "open": 0, "avg_r": None, "win": None, "total_r": 0}
+        return {"n": 0, "closed": 0, "open": 0, "avg_r": None, "low": None, "high": None, "win": None, "total_r": 0}
     cl = t[t["status"] == "closed"]
+    low, high = _range(cl["R"])
     return {"n": len(t), "closed": len(cl), "open": int((t["status"] == "open").sum()),
-            "avg_r": round(cl["R"].mean(), 3) if len(cl) else None,
+            "avg_r": round(cl["R"].mean(), 3) if len(cl) else None, "low": low, "high": high,
             "win": round((cl["R"] > 0).mean(), 3) if len(cl) else None,
             "total_r": round(cl["R"].sum(), 2)}
 
@@ -103,7 +137,7 @@ def journal_stats():
     v = latest_validated() or {"setups": []}
     bt = {"+".join([s["setup"], *s["filters"]]): s["test"] for s in v["setups"]}
     if not len(t):
-        t = pd.DataFrame(columns=["variant", "status", "R", "taken", "rejected", "conviction"])
+        t = pd.DataFrame(columns=["variant", "status", "R", "taken", "rejected", "conviction", "exit_date", "backtest_slot_r"])
     acc = t[t["rejected"].isna()]
     by_setup = []
     for key in sorted(set(t["variant"]) | set(bt)):
@@ -111,7 +145,8 @@ def journal_stats():
         by_setup.append({"variant": key, "validated": key in bt, "all": _group(g), "taken": _group(g[g["taken"] == 1]),
                          "backtest_test_avg_r": bt.get(key, {}).get("avg_r"),
                          "backtest_slot_avg_r": bt.get(key, {}).get("taken_avg_r")})
-    return {"overall": {"accepted": _group(acc), "taken": _group(acc[acc["taken"] == 1]),
+    return {"go_live": _go_live(t),
+            "overall": {"accepted": _group(acc), "taken": _group(acc[acc["taken"] == 1]),
                         "rejected": _group(t[t["rejected"].notna()])},
             "by_setup": by_setup,
             "by_conviction": {k: _group(acc[acc["conviction"].fillna("none") == k])
