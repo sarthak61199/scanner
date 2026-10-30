@@ -16,10 +16,10 @@ Not investment advice. Research tool.
 import os
 import re
 import pandas as pd
-from config import CAPITAL, MAX_OPEN, MIN_TURNOVER_CR, RISK_PCT, TAG_DAYS, TEST_MONTHS, TOP
+from config import MAX_OPEN, MIN_TURNOVER_CR, RISK_PCT, TAG_DAYS, TEST_MONTHS, TOP
 from data import add_filters, download, enrich, load_macro, load_nifty, load_universe
 from nse import add_nse_signals, fundamentals, red_flags
-from backtest import backtest
+from backtest import backtest, position_size
 from research import load_validated, run_research
 from llm import llm_notes
 from news import fetch_news, market_mood, mood_text, tag_news
@@ -81,14 +81,15 @@ def scan_job(job_id=None):
               f"{MAX_OPEN}-slot test avgR {v['test']['taken_avg_r']}")
 
     # 4. Trade plans: stocks where a validated setup triggered today, ranked by score
-    risk_amt = CAPITAL * RISK_PCT / 100
     plans = []
     for _, r in df.sort_values("score", ascending=False).iterrows():
         for v in validated:
             if r[v["key"]]:
                 stop = r["close"] - v["stop_atr"] * r["atr"]
-                qty = int(risk_amt / (r["close"] - stop))
-                qty = min(qty, int(CAPITAL * 0.2 / r["close"]))  # cap 20% capital per position
+                qty = position_size(r["close"], r["close"] - stop)
+                if not qty:  # one share is over the 20% position cap
+                    print(f"  skipped {r['sym']} ({v['key']}): too expensive at {r['close']:.0f}")
+                    continue
                 has_target = v["exit"] in ("fixed", "breakeven")
                 plans.append({"symbol": r["sym"], "sector": r["sector"], "setup": v["key"], "score": round(r["score"], 2),
                               "entry": round(r["close"], 1), "stop": round(stop, 1),

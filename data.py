@@ -6,7 +6,7 @@ import numpy as np
 import requests
 import yfinance as yf
 warnings.filterwarnings("ignore")
-from config import HISTORY_YEARS, MACRO, TOP_SECTORS
+from config import HISTORY_YEARS, MACRO, MIN_TURNOVER_CR, TOP_SECTORS
 
 
 FALLBACK = {  # used if NSE list download fails
@@ -130,6 +130,22 @@ def macro_filters(m, idx):
     }, index=idx).fillna(False)
 
 
+def add_scores(frames, uni):
+    """Add each day's stock score: the daily scan's ranking (see scan_job), computed for every past day.
+    NaN when the stock is below the turnover minimum."""
+    col = lambda k: pd.DataFrame({s: d[k] for s, d in frames.items()})
+    close, ret63, ret126 = col("Close"), col("ret63"), col("ret126")
+    sectors = pd.Series(uni)
+    above200 = (close > col("sma200")).astype(float).where(close.notna())
+    sec = ret63.T.groupby(sectors).median().T.rank(axis=1, pct=True) * 0.5 \
+        + ret126.T.groupby(sectors).median().T.rank(axis=1, pct=True) * 0.3 \
+        + above200.T.groupby(sectors).mean().T.rank(axis=1, pct=True) * 0.2
+    liquid = col("turnover_cr") >= MIN_TURNOVER_CR
+    own = ret63.where(liquid).rank(axis=1, pct=True) * 0.4 + ret126.where(liquid).rank(axis=1, pct=True) * 0.2
+    for s, d in frames.items():
+        d["score"] = (own[s] + sec[uni[s]] * 0.4).reindex(d.index).values
+
+
 def add_filters(frames, uni, nifty, macro=None):
     """Add boolean filter columns to every stock frame. Each uses only data available on that day."""
     close = pd.DataFrame({s: d["Close"] for s, d in frames.items()})
@@ -159,3 +175,4 @@ def add_filters(frames, uni, nifty, macro=None):
         d["oversold"] = (rsi2.rolling(3).min() < 15).values
         for f in mf.columns:
             d[f] = mf[f].reindex(idx).fillna(False).astype(bool).values
+    add_scores(frames, uni)

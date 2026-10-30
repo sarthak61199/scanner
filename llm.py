@@ -50,7 +50,7 @@ def backtest_context(trades, stats, validated, symbol, setup, sector, d, test_st
              f"(positive train, test >= 0R, holds without its best year, survivable drawdown).",
              f"All NIFTY 500 stocks, {HISTORY_YEARS}y prices: {st['n']} trades, avg {st['avgR']}R "
              f"(before costs {st['grossR']}R), {st['win%']}% profitable.",
-             f"Account holding max {MAX_OPEN} trades (strongest momentum first), TEST period: "
+             f"Account holding max {MAX_OPEN} trades (highest score first), TEST period: "
              f"{v['test']['taken']} trades, avg {v['test']['taken_avg_r']}R, max drawdown {v['test']['max_dd_r']}R."]
     if len(t):
         for name, part in [(f"Train (before {test_start:%Y-%m-%d})", t[t["date"] < test_start]),

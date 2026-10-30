@@ -1,7 +1,14 @@
 """Trade simulation: entry at close, stop/target/trailing exits, costs, drawdown, 5-slot account."""
 import pandas as pd
 import numpy as np
-from config import COST_PCT, MAX_OPEN
+from config import CAPITAL, COST_PCT, MAX_OPEN, MIN_TURNOVER_CR, RISK_PCT
+
+
+def position_size(entry, risk):
+    """Shares for a trade: RISK_PCT of capital at risk, capped at 20% of capital. 0 = can't be bought."""
+    if not (entry > 0 and risk > 0):
+        return 0
+    return min(int(CAPITAL * RISK_PCT / 100 / risk), int(CAPITAL * 0.2 / entry))
 
 
 def simulate_trade(d, i, stop_atr=2.0, exit_rule="fixed", rr=2.0, partial=False):
@@ -13,11 +20,14 @@ def simulate_trade(d, i, stop_atr=2.0, exit_rule="fixed", rr=2.0, partial=False)
       chandelier  no target; stop trails highest high - 3 x ATR, only moves up (max 60 days)
       +mkt        also exit at the close when NIFTY closes below its 50-day average
     partial=True (paper journal): a trade still open at the end of the data returns its state, status 'open',
-    instead of None: current stop, last close and mark-to-market R."""
+    instead of None: current stop, last close and mark-to-market R.
+    R is in units of the full RISK_PCT risk: a position cut by the size cap risks, and counts, less than 1R."""
     entry, atr = d["Close"].iat[i], d["atr"].iat[i]
     risk = stop_atr * atr
     if not risk > 0:
         return None
+    qty = position_size(entry, risk)
+    size = qty * risk / (CAPITAL * RISK_PCT / 100)
     rule, mkt = exit_rule.split("+")[0], exit_rule.endswith("+mkt")
     has_target = rule in ("fixed", "breakeven")
     max_days = 30 if has_target else 60
@@ -26,7 +36,7 @@ def simulate_trade(d, i, stop_atr=2.0, exit_rule="fixed", rr=2.0, partial=False)
     o, h, l, c = (d[k].values[sl] for k in ("Open", "High", "Low", "Close"))
     ema, atrs, weak = d["ema20"].values[sl], d["atr"].values[sl], d["mkt_weak"].values[sl]
     if not len(c):
-        return _open_state(d, i, entry, risk, stop, entry, 0) if partial else None
+        return _open_state(d, i, entry, risk, stop, entry, 0, qty, size) if partial else None
     exit_px, reason, days, hh = c[-1], "time", len(c), entry
     for k in range(len(c)):
         if o[k] <= stop:                                   # gapped through the stop
@@ -48,25 +58,26 @@ def simulate_trade(d, i, stop_atr=2.0, exit_rule="fixed", rr=2.0, partial=False)
             hh = max(hh, h[k])
             stop = max(stop, hh - 3 * atrs[k])
     if reason == "time" and len(c) < max_days:            # still open at the end of the data
-        return _open_state(d, i, entry, risk, stop, c[-1], len(c)) if partial else None
-    gross = (exit_px - entry) / risk
-    cost = entry * COST_PCT / 100 / risk                   # round-trip costs, in R
+        return _open_state(d, i, entry, risk, stop, c[-1], len(c), qty, size) if partial else None
+    gross = (exit_px - entry) / risk * size
+    cost = entry * COST_PCT / 100 / risk * size            # round-trip costs, in R
     return {"date": d.index[i], "exit_date": d.index[i + days], "entry": round(entry, 2), "exit": round(float(exit_px), 2),
-            "reason": reason, "days": days, "gross_R": round(gross, 3), "R": round(gross - cost, 3), "status": "closed"}
+            "reason": reason, "days": days, "gross_R": round(gross, 3), "R": round(gross - cost, 3), "qty": qty, "status": "closed"}
 
 
-def _open_state(d, i, entry, risk, stop, last, days):
-    gross = (last - entry) / risk
+def _open_state(d, i, entry, risk, stop, last, days, qty, size):
+    gross = (last - entry) / risk * size
     return {"date": d.index[i], "entry": round(entry, 2), "stop": round(float(stop), 2), "last": round(float(last), 2),
-            "days": days, "gross_R": round(gross, 3), "R": round(gross - entry * COST_PCT / 100 / risk, 3), "status": "open"}
+            "days": days, "gross_R": round(gross, 3), "R": round(gross - entry * COST_PCT / 100 / risk * size, 3), "qty": qty, "status": "open"}
 
 
 def backtest(frames, setup, filters=(), **kw):
     """Simulate every historical signal of a setup (+ filters). Returns summary stats and the trade list.
-    kw goes to simulate_trade (stop_atr, exit_rule)."""
+    kw goes to simulate_trade (stop_atr, exit_rule). Trades still open at the end of the data count at their last
+    close, reason 'open'; signals with no bars yet, or too expensive to buy (qty 0), are skipped."""
     trades, variant = [], "+".join([setup, *filters])
     for sym, d in frames.items():
-        mask = d[setup].values.copy()
+        mask = d[setup].values & (d["turnover_cr"].values >= MIN_TURNOVER_CR)  # same liquidity minimum as the scan
         for f in filters:
             mask &= d[f].values.astype(bool)
         last = -999
@@ -74,10 +85,13 @@ def backtest(frames, setup, filters=(), **kw):
             if i - last < 10:                  # de-duplicate clustered signals
                 continue
             last = i
-            t = simulate_trade(d, i, **kw)
-            if t:
-                trades.append({"symbol": sym, "setup": setup, "variant": variant,
-                               "mom": round(float(d["ret63"].iat[i]), 4), **t})  # 3m return, ranks same-day signals
+            t = simulate_trade(d, i, partial=True, **kw)
+            if not t or not t["qty"] or not t["days"]:
+                continue
+            if t["status"] == "open":
+                t = {**t, "exit_date": d.index[-1], "exit": t["last"], "reason": "open"}
+            trades.append({"symbol": sym, "setup": setup, "variant": variant, "mom": round(float(d["ret63"].iat[i]), 4),
+                           "score": float(d["score"].iat[i]), **t})  # score ranks same-day signals
     return summarize(trades), trades
 
 
@@ -97,9 +111,9 @@ def risk_stats(t):
 
 def capped_trades(t, max_open=MAX_OPEN):
     """Trades a real account would have taken: in date order, skip signals while max_open trades are open.
-    Same-day signals are taken strongest 3-month momentum first (as the daily scan ranks them)."""
+    Same-day signals are taken highest score first (as the daily scan ranks them)."""
     taken, open_exits = [], []
-    for _, r in t.sort_values(["date", "mom"], ascending=[True, False]).iterrows():
+    for _, r in t.sort_values(["date", "score"], ascending=[True, False]).iterrows():
         open_exits = [x for x in open_exits if x > r["date"]]
         if len(open_exits) < max_open:
             open_exits.append(r["exit_date"])

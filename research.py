@@ -72,6 +72,16 @@ def pick_validated(rows):
     return out
 
 
+def combined_stats(frames, chosen, test_start):
+    """Train/test stats of the validated setups as the live account trades them: one set of MAX_OPEN slots."""
+    trades = [t for r in chosen
+              for t in backtest(frames, r["setup"], r["filters"], stop_atr=r["stop_atr"], exit_rule=r["exit"])[1]]
+    if not trades:
+        return None
+    t = pd.DataFrame(trades)
+    return {"train": _part_stats(t[t["date"] < test_start]), "test": _part_stats(t[t["date"] >= test_start])}
+
+
 def run_research(frames, job_id=None):
     last_day = max(d.index[-1] for d in frames.values())
     test_start = last_day - pd.DateOffset(months=TEST_MONTHS)
@@ -79,9 +89,11 @@ def run_research(frames, job_id=None):
     print(f"Research: {n} combinations (train: before {test_start:%Y-%m-%d}, test: after)...")
     rows = research(frames, test_start)
     chosen = pick_validated(rows)
+    portfolio = combined_stats(frames, chosen, test_start)
     validated = {"generated": f"{pd.Timestamp.today():%Y-%m-%d}", "test_start": f"{test_start:%Y-%m-%d}",
                  "rules": {"min_train_n": MIN_TRAIN_N, "min_train_avg_r": MIN_TRAIN_R, "min_test_n": MIN_TEST_N,
                            "min_test_avg_r": MIN_TEST_R, "max_test_dd_r": MAX_TEST_DD_R},
+                 "portfolio": portfolio,
                  "setups": [{k: r[k] for k in ("setup", "filters", "exit", "stop_atr", "train", "test",
                                                "train_ex_best_year", "by_year")} for r in chosen]}
     with connect() as c:
@@ -90,6 +102,9 @@ def run_research(frames, job_id=None):
                             dumps(rows), dumps(validated))).lastrowid
     print(f"\n{len([r for r in rows if not r['fails']])} of {len(rows)} combinations passed; "
           f"validated: {[' '.join(['+'.join([r['setup'], *r['filters']]), r['exit'], str(r['stop_atr'])]) for r in chosen] or 'none'}")
+    if portfolio:
+        print(f"All validated setups sharing {MAX_OPEN} slots, test: {portfolio['test']['taken']} trades, "
+              f"avgR {portfolio['test']['taken_avg_r']}, max drawdown {portfolio['test']['max_dd_r']}R")
     print(f"Saved research run {run_id}")
     return run_id
 
