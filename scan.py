@@ -2,11 +2,11 @@
 MVP: Indian stock discovery + timing scanner.
 
   pip install yfinance pandas requests anthropic python-dotenv pypdf fonttools fastapi uvicorn
-  python scan.py                 # scan, print report, write report.md, save to trading.db
-  RESEARCH=true in .env          # instead: test all setups, save a research run + research.md
+  python scan.py                 # scan, print report, save to trading.db
+  RESEARCH=true in .env          # instead: test all setups, save a research run
   cd ui && npm install && npm run build   # once, and after UI changes
   uvicorn api:app                # UI at http://localhost:8000, REST API under /api (scan/research as jobs)
-  Settings: edit config.py. Files: config, data, nse, backtest, research, llm, report.
+  Settings: edit config.py. Files: config, data, nse, backtest, research, llm.
 
 Pipeline: universe -> sector strength -> stock ranking -> setup detection
           -> backtested stats per setup -> trade plan -> (optional) Claude notes
@@ -22,7 +22,6 @@ from nse import add_nse_signals, fundamentals, red_flags
 from backtest import backtest
 from research import load_validated, run_research
 from llm import llm_notes
-from report import write_report
 from news import fetch_news, market_mood, mood_text, tag_news
 from db import connect, dumps
 from journal import open_trades, update_trades
@@ -44,7 +43,7 @@ def research_job(job_id=None):
 
 
 def scan_job(job_id=None):
-    """Full scan; saves it to the scans table and report.md. Returns the scan id."""
+    """Full scan; saves it to the scans table. Returns the scan id."""
     uni, frames, deals = load_data()
     validated = load_validated()
 
@@ -142,9 +141,8 @@ def scan_job(job_id=None):
         except Exception as e:
             print(f"\n[warn] Claude notes skipped: {e}")
 
-    write_report(sec, validated, plans, df, notes, TOP, funds, rejected, mood)
     scan_id = save_scan(job_id, sec, plans, df, rejected, funds, mood, notes, all_trades)
-    print(f"\nSaved report.md and scan {scan_id}")
+    print(f"\nSaved scan {scan_id}")
 
     # 8. Paper-trading journal: manage open paper trades first (frees slots), then record today's plans
     print("\nUpdating paper-trading journal...")

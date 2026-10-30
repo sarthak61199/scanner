@@ -148,7 +148,7 @@ def mood_label(score):
 
 
 def mood_text(mood, sector=None):
-    """Plain-text market mood for the report and the Claude prompt; adds that sector's headlines if given."""
+    """Plain-text market mood for the scan log and the Claude prompt; adds that sector's headlines if given."""
     if not mood:
         return "(no tagged market news)"
     lines = [f"Mint headlines, last {mood['days']} days: {mood['n']} market-relevant, average impact {mood['score']:+.2f} "

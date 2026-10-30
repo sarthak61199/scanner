@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Python (flat modules in repo root, venv in `.venv`; no tests or linter configured):
 
-- `python scan.py` — run one scan: prints report, writes `report.md`, saves to `trading.db`
-- `RESEARCH=true python scan.py` — research mode instead (tests all setup × filter × exit × stop combos, writes `research.md`)
+- `python scan.py` — run one scan: prints report, saves to `trading.db`
+- `RESEARCH=true python scan.py` — research mode instead (tests all setup × filter × exit × stop combos, saves to `trading.db`)
 - `uvicorn api:app --reload` — API server (the ASGI object is `app` in `api.py`, not `app.py`). UI at :8000, docs at :8000/docs
 
 UI (`ui/`, Vite + React 19 + TanStack Router + shadcn/base-ui + Tailwind 4):
@@ -23,10 +23,10 @@ Secrets (e.g. `ANTHROPIC_API_KEY`) come from `.env`; `SCHEDULER=false` disables 
 
 Indian (NSE) stock scanner/swing-trade planner. All tunables live in `config.py` (capital, risk %, setups, filters, exits, research pass thresholds, schedule, paths).
 
-Pipeline (`scan.py` orchestrates): universe + prices/indicators/setups (`data.py`, yfinance, NIFTY 500) → sector strength → stock ranking → setup detection (`breakout`, `pullback`, `earnings_gap`) → backtested stats per setup (`backtest.py`) → trade plan sized by `RISK_PCT` → optional Claude review (`llm.py`) → `report.py` / DB.
+Pipeline (`scan.py` orchestrates): universe + prices/indicators/setups (`data.py`, yfinance, NIFTY 500) → sector strength → stock ranking → setup detection (`breakout`, `pullback`, `earnings_gap`) → backtested stats per setup (`backtest.py`) → trade plan sized by `RISK_PCT` → optional Claude review (`llm.py`) → DB.
 
 - `nse.py`: NSE delivery %, bulk/block deals, results dates, XBRL fundamentals/red flags, announcements and PDFs. `news.py`: Mint RSS archive, tagged by Claude, rolled into a market-mood summary (context only, not a validated signal).
-- `backtest.py`: trade simulation (entry at close, stop/target/trailing exits, costs, `MAX_OPEN`-slot portfolio cap). `EXIT_RULES` is shared by config API, reports and journal.
+- `backtest.py`: trade simulation (entry at close, stop/target/trailing exits, costs, `MAX_OPEN`-slot portfolio cap). `EXIT_RULES` is shared by config API, Claude review and journal.
 - `research.py`: train/test split (last `TEST_MONTHS` held out); combos must pass the train/test rules in `config.py`. `latest_validated()` returns the surviving combos that scans and the journal use.
 - `journal.py`: paper-trading journal — every trade plan becomes a paper trade managed with the *same* `simulate_trade` exit logic as the backtest, so live results are comparable. Updated by every scan.
 - `db.py`: single SQLite file `trading.db` (git-ignored) holding NSE/news caches plus scan/research/journal/jobs outputs. Structured results are stored as JSON columns (`dumps`/`loads`/`clean` helpers).

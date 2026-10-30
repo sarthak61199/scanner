@@ -68,7 +68,7 @@ jobs:
           rsync -az --delete \
             --exclude .git --exclude .github --exclude .venv --exclude .env \
             --exclude 'trading.db*' --exclude __pycache__ \
-            --exclude ui/node_modules --exclude report.md --exclude research.md \
+            --exclude ui/node_modules \
             ./ "${{ secrets.DO_USER }}@${{ secrets.DO_HOST }}:/opt/scanner/"
 
       - name: Install and restart

@@ -1,8 +1,7 @@
 """Research mode: test every setup x filter x exit x stop, keep what passes -> research_runs table."""
 import pandas as pd
-from config import COST_PCT, FILTERS, MAX_OPEN, MAX_TEST_DD_R, MIN_TEST_N, MIN_TEST_R, MIN_TRAIN_N, MIN_TRAIN_R, RESEARCH_EXITS, SETUPS, STOP_WIDTHS, TEST_MONTHS
+from config import FILTERS, MAX_OPEN, MAX_TEST_DD_R, MIN_TEST_N, MIN_TEST_R, MIN_TRAIN_N, MIN_TRAIN_R, RESEARCH_EXITS, SETUPS, STOP_WIDTHS, TEST_MONTHS
 from backtest import backtest, capped_trades, risk_stats
-from report import md_table
 from db import connect, dumps, loads
 
 
@@ -89,42 +88,10 @@ def run_research(frames, job_id=None):
         run_id = c.execute("INSERT INTO research_runs (job_id, created, test_start, rows, validated) VALUES (?, ?, ?, ?, ?)",
                            (job_id, f"{pd.Timestamp.now():%Y-%m-%d %H:%M:%S}", validated["test_start"],
                             dumps(rows), dumps(validated))).lastrowid
-    write_research_report(rows, chosen, test_start)
     print(f"\n{len([r for r in rows if not r['fails']])} of {len(rows)} combinations passed; "
           f"validated: {[' '.join(['+'.join([r['setup'], *r['filters']]), r['exit'], str(r['stop_atr'])]) for r in chosen] or 'none'}")
-    print(f"Saved research run {run_id} and research.md")
+    print(f"Saved research run {run_id}")
     return run_id
-
-
-def write_research_report(rows, chosen, test_start):
-    def flat(r):
-        return {"setup": "+".join([r["setup"], *r["filters"]]), "exit": r["exit"], "stop": r["stop_atr"],
-                "train_n": r["train"]["n"], "train_avgR": r["train"]["avg_r"],
-                "ex_best_yr": r["train_ex_best_year"], "test_n": r["test"]["n"],
-                "test_avgR": r["test"]["avg_r"], "test_win": r["test"]["win"],
-                "test_taken": r["test"]["taken"], "taken_avgR": r["test"]["taken_avg_r"], "test_DD_R": r["test"]["max_dd_r"]}
-    passed = [r for r in rows if not r["fails"]]
-    # closest misses: failed only one rule, best test result first
-    misses = sorted([r for r in rows if len(r["fails"]) == 1 and r["test"]["avg_r"] is not None],
-                    key=lambda r: -r["test"]["avg_r"])[:10]
-    lines = [f"# Setup research - {pd.Timestamp.today():%Y-%m-%d}", "",
-             f"Train: before {test_start:%Y-%m-%d}. Test: after (held out). Results in R after {COST_PCT}% costs.", "",
-             "**Pass rules:** "
-             f"train n >= {MIN_TRAIN_N} and avgR > {MIN_TRAIN_R}; test n >= {MIN_TEST_N} and avgR >= {MIN_TEST_R}; "
-             f"train still positive without its best year; test drawdown <= {MAX_TEST_DD_R}R "
-             f"(portfolio of max {MAX_OPEN} open trades, same-day signals by momentum - test_taken/taken_avgR are those trades, "
-             f"and taken_avgR must also be >= {MIN_TEST_R}); "
-             "a filter must beat the unfiltered setup (same exit/stop) in test.", "",
-             f"{len(rows)} combinations tested. Note: testing many combinations means some pass by luck.", "",
-             "## Validated (saved to the database)", ""]
-    lines += [md_table(pd.DataFrame([flat(r) for r in chosen])), ""] if chosen else \
-             ["**None.** No setup has a validated edge right now - the daily scan should sit out.", ""]
-    lines += [f"## All passing combinations ({len(passed)})", ""]
-    lines += [md_table(pd.DataFrame([flat(r) for r in sorted(passed, key=lambda r: -r['test']['avg_r'])])), ""] if passed else ["None.", ""]
-    lines += ["## Closest misses (failed one rule)", ""]
-    lines += [md_table(pd.DataFrame([{**flat(r), "failed": r["fails"][0]} for r in misses])), ""] if misses else ["None.", ""]
-    with open("research.md", "w") as f:
-        f.write("\n".join(lines))
 
 
 def load_validated(max_age_days=30):
